@@ -604,7 +604,13 @@ export const quickStyleProperties: Record<
 	},
 	tablecomponent: {
 		tableHeader: containerDefaultProps,
+		tableHeaderCell: containerDefaultProps,
+		tableActionHeaderCell: containerDefaultProps,
 		tableBody: containerDefaultProps,
+		tableCell: containerDefaultProps,
+		tableFirstCell: containerDefaultProps,
+		tableLastCell: containerDefaultProps,
+		tableActionCell: containerDefaultProps,
 		tableFooter: containerDefaultProps,
 		container: containerDefaultProps
 	},

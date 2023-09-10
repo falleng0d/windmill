@@ -1271,7 +1271,13 @@ This is a paragraph.
 		customCss: {
 			container: { class: '', style: '' },
 			tableHeader: { class: '', style: '' },
+			tableHeaderCell: { class: '', style: '' },
+			tableActionHeaderCell: { class: '', style: '' },
 			tableBody: { class: '', style: '' },
+			tableCell: { class: '', style: '' },
+			tableFirstCell: { class: '', style: '' },
+			tableLastCell: { class: '', style: '' },
+			tableActionCell: { class: '', style: '' },
 			tableFooter: { class: '', style: '' }
 		},
 		initialData: {
