@@ -345,35 +345,18 @@
 										{@const context = cell?.getContext()}
 										{#if context}
 											{@const component = renderCell(cell.column.columnDef.cell, context)}
-											<!--if is not last child-->
-											{#if index < safeVisibleCell(row).length - 1}
-												<td
-													on:keydown={() => toggleRow(row)}
-													on:click={() => toggleRow(row)}
-													class="p-4 whitespace-pre-wrap truncate text-xs text-primary"
-													style={'width: ' + cell.column.getSize() + 'px'}
-												>
-													{#if typeof cell.column.columnDef.cell != 'string' && cellIsObject(cell.column.columnDef.cell, context)}
-														{JSON.stringify(cell.column.columnDef.cell(context), null, 4)}
-													{:else if component !== undefined}
-														<svelte:component this={component} />
-													{/if}
-												</td>
-											{:else}
-											<!--if is last child then width: 1%; white-space: nowrap;-->
-												<td
-													on:keydown={() => toggleRow(row)}
-													on:click={() => toggleRow(row)}
-													class="p-4 whitespace-nowrap truncate text-xs text-primary w-[1%]"
-													style={'width: ' + cell.column.getSize() + 'px'}
-												>
-													{#if typeof cell.column.columnDef.cell != 'string' && cellIsObject(cell.column.columnDef.cell, context)}
-														{JSON.stringify(cell.column.columnDef.cell(context), null, 4)}
-													{:else if component !== undefined}
-														<svelte:component this={component}/>
-													{/if}
-												</td>
-											{/if}
+											<td
+												on:keydown={() => toggleRow(row)}
+												on:click={() => toggleRow(row)}
+												class="p-4 whitespace-pre-wrap truncate text-xs text-primary"
+												style={'width: ' + cell.column.getSize() + 'px'}
+											>
+												{#if typeof cell.column.columnDef.cell != 'string' && cellIsObject(cell.column.columnDef.cell, context)}
+													{JSON.stringify(cell.column.columnDef.cell(context), null, 4)}
+												{:else if component != undefined}
+													<svelte:component this={component} />
+												{/if}
+											</td>
 										{/if}
 									{/if}
 								{/each}
