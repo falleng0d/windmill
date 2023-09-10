@@ -304,7 +304,10 @@
 										{@const context = header?.getContext()}
 										{#if context}
 											{@const component = renderCell(header.column.columnDef.header, context)}
-											<th class="!p-0">
+											<th
+												class={twMerge('!p-0', css?.tableHeaderCell?.class ?? '')}
+												style={css?.tableHeaderCell?.style ?? ''}
+											>
 												<span class="block px-4 py-4 text-sm font-semibold border-b">
 													{#if !header.isPlaceholder && component}
 														<svelte:component this={component} />
@@ -315,7 +318,13 @@
 									{/if}
 								{/each}
 								{#if actionButtons.length > 0}
-									<th class="!p-0">
+									<th
+										class={twMerge(
+											'!p-0',
+											(css?.tableActionHeaderCell?.class || css?.tableHeaderCell?.class) ?? ''
+										)}
+										style={(css?.tableActionHeaderCell?.style || css?.tableHeaderCell?.style) ?? ''}
+									>
 										<span class="block px-4 py-4 text-sm font-semibold border-b"> Actions </span>
 									</th>
 								{/if}
@@ -343,13 +352,30 @@
 								{#each safeVisibleCell(row) as cell, index (index)}
 									{#if cell?.column?.columnDef?.cell}
 										{@const context = cell?.getContext()}
+										{@const isFirstCell = index === 0}
+										{@const isLastCell = index === safeVisibleCell(row).length - 1}
+										{@const cellStyle = isLastCell
+											? css?.tableLastCell?.style || css?.tableCell?.style
+											: isFirstCell
+											? css?.tableFirstCell?.style || css?.tableCell?.style
+											: css?.tableCell?.style}
+										{@const cellClass = isLastCell
+											? css?.tableLastCell?.class || css?.tableCell?.class
+											: isFirstCell
+											? css?.tableFirstCell?.class || css?.tableCell?.class
+											: css?.tableCell?.class}
 										{#if context}
 											{@const component = renderCell(cell.column.columnDef.cell, context)}
 											<td
 												on:keydown={() => toggleRow(row)}
 												on:click={() => toggleRow(row)}
-												class="p-4 whitespace-pre-wrap truncate text-xs text-primary"
-												style={'width: ' + cell.column.getSize() + 'px'}
+												class={twMerge(
+													'p-4 whitespace-pre-wrap truncate text-xs text-primary',
+													cellClass ?? ''
+												)}
+												style={cellStyle.match(/^width:/)
+													? cellStyle
+													: cellStyle + ';width: ' + cell.column.getSize() + 'px'}
 											>
 												{#if typeof cell.column.columnDef.cell != 'string' && cellIsObject(cell.column.columnDef.cell, context)}
 													{JSON.stringify(cell.column.columnDef.cell(context), null, 4)}
@@ -363,7 +389,8 @@
 
 								{#if actionButtons.length > 0}
 									<td
-										class="p-2"
+										class={twMerge('p-2', css?.tableActionCell?.class ?? '')}
+										style={css?.tableActionCell?.style ?? ''}
 										on:keypress={() => toggleRow(row)}
 										on:click={() => toggleRow(row)}
 									>
