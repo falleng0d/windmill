@@ -27,6 +27,7 @@
 	import LoadingIcon from '../apps/svelte-select/lib/LoadingIcon.svelte'
 	import { sleep } from '$lib/utils'
 	import { autoPlacement } from '@floating-ui/core'
+	import { ExternalLink } from 'lucide-svelte'
 
 	// props
 	export let iconOnly: boolean = false
@@ -291,7 +292,7 @@
 						<Icon data={faMagicWandSparkles} />
 					</Button>
 				</div>
-				{#if ['postgresql', 'mysql'].includes(lang) && dbSchema}
+				{#if ['postgresql', 'mysql', 'snowflake', 'bigquery', 'graphql'].includes(lang) && dbSchema?.lang === lang}
 					<div class="flex flex-row items-center justify-between w-96 mt-2">
 						<p class="text-sm">
 							Will take into account the DB schema
@@ -309,8 +310,12 @@
 				{/if}
 			{:else}
 				<p class="text-sm"
-					>Enable Windmill AI in the <a href="/workspace_settings?tab=openai">workspace settings.</a
-					></p
+					>Enable Windmill AI in the <a
+						href="/workspace_settings?tab=openai"
+						target="_blank"
+						class="inline-flex flex-row items-center gap-1"
+						>workspace settings <ExternalLink size={16} />
+					</a></p
 				>
 			{/if}
 		</div>

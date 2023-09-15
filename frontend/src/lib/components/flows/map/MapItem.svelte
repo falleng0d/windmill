@@ -34,7 +34,7 @@
 		}
 		select: string
 		newBranch: { module: FlowModule }
-		move: { module: FlowModule }
+		move: { module: FlowModule } | undefined
 	}>()
 
 	$: itemProps = {
@@ -78,6 +78,8 @@
 					on:new={(e) => {
 						dispatch('insert', { modules, index: idx, detail: e.detail })
 					}}
+					index={idx}
+					{modules}
 				/>
 			{/if}
 		</div>
@@ -212,6 +214,8 @@
 					on:new={(e) => {
 						dispatch('insert', { modules, index: idx + 1, detail: e.detail })
 					}}
+					index={idx + 1}
+					{modules}
 				/>
 			{/if}
 		</div>

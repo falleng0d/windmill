@@ -1,6 +1,55 @@
 # Changelog
 
 
+## [1.173.0](https://github.com/windmill-labs/windmill/compare/v1.172.1...v1.173.0) (2023-09-14)
+
+
+### Features
+
+* cli sync on windows ([#2283](https://github.com/windmill-labs/windmill/issues/2283)) ([c371cb3](https://github.com/windmill-labs/windmill/commit/c371cb397ab3d0c534e2c553d1dfb1ad5176d2a6))
+
+
+### Bug Fixes
+
+* accept jobs whose duration &gt; 24 days ([2c00894](https://github.com/windmill-labs/windmill/commit/2c00894122aa8caee59b20625935284de6902950))
+
+## [1.172.1](https://github.com/windmill-labs/windmill/compare/v1.172.0...v1.172.1) (2023-09-14)
+
+
+### Bug Fixes
+
+* improve splitpane + improve deleting conditional tab ([1629008](https://github.com/windmill-labs/windmill/commit/1629008eb2eb48ff9cc2cf6b3a351efcf682244d))
+* update to svelte 4 ([#2280](https://github.com/windmill-labs/windmill/issues/2280)) ([90c10d8](https://github.com/windmill-labs/windmill/commit/90c10d803b4c47a9e1ac5b9e49e2a614344299a9))
+
+## [1.172.0](https://github.com/windmill-labs/windmill/compare/v1.171.0...v1.172.0) (2023-09-13)
+
+
+### Features
+
+* improve ai flow ([#2270](https://github.com/windmill-labs/windmill/issues/2270)) ([b23417a](https://github.com/windmill-labs/windmill/commit/b23417ab5b9938bbdf9db6449102760ff8c80152))
+* worker groups admin panel ([#2277](https://github.com/windmill-labs/windmill/issues/2277)) ([070b162](https://github.com/windmill-labs/windmill/commit/070b16222bc666866284180b3878f4d4f27bfa85))
+
+
+### Bug Fixes
+
+* ai flow nits ([#2272](https://github.com/windmill-labs/windmill/issues/2272)) ([8f6f46d](https://github.com/windmill-labs/windmill/commit/8f6f46de199d58133b9faa77cdbcbcfd6cb962f7))
+
+## [1.171.0](https://github.com/windmill-labs/windmill/compare/v1.170.0...v1.171.0) (2023-09-12)
+
+
+### Features
+
+* attempt to SIGTERM before SIGKILL for bash ([f40bbba](https://github.com/windmill-labs/windmill/commit/f40bbba519a97cbb1ec142c335f038dbebcd4e7c))
+* zero copy result for job result ([#2263](https://github.com/windmill-labs/windmill/issues/2263)) ([22a7da5](https://github.com/windmill-labs/windmill/commit/22a7da58b1d20721892906cba2dee6fbeb1cc1fd))
+
+
+### Bug Fixes
+
+* 2257 TIME  convertion in pg_executor.rs ([#2267](https://github.com/windmill-labs/windmill/issues/2267)) ([3d71253](https://github.com/windmill-labs/windmill/commit/3d71253abdb0dff1670a796d07a53ecd0a98414e))
+* fix field duplicate in app background settings ([164cdaf](https://github.com/windmill-labs/windmill/commit/164cdaf09464646dee4e70a699222a454eb0d898))
+* improve bun lockfile resolution ([9103ec4](https://github.com/windmill-labs/windmill/commit/9103ec445db81395a5851202eecb87301d0b4987))
+* remove result and args from list completed and list queue jobs ([e7e63e1](https://github.com/windmill-labs/windmill/commit/e7e63e111a73e0986050a8fe7fdc18784ba902b0))
+
 ## [1.170.0](https://github.com/windmill-labs/windmill/compare/v1.169.0...v1.170.0) (2023-09-08)
 
 
