@@ -1,11 +1,13 @@
 import { languages } from 'monaco-editor/esm/vs/editor/editor.api'
+import type { editor } from 'monaco-editor/esm/vs/editor/editor.api'
+
 export function editorConfig(
 	model: any,
 	code: string,
 	lang: string,
 	automaticLayout: boolean,
 	fixedOverflowWidgets: boolean
-) {
+): editor.IStandaloneEditorConstructionOptions {
 	return {
 		model,
 		value: code,
@@ -32,8 +34,12 @@ export function editorConfig(
 		bracketPairColorization: {
 			enabled: true
 		},
-		'bracketPairColorization.enabled': true,
-		matchBrackets: 'always' as 'always'
+		fontFamily: 'JetBrains Mono, Consolas, "Courier New", monospace',
+		fontSize: 18,
+		rulers: [80],
+		cursorSurroundingLines: 10,
+		cursorStyle: 'block',
+		fontLigatures: true
 	}
 }
 
