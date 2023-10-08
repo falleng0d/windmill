@@ -827,6 +827,7 @@
 			...editorConfig(model, code, lang, automaticLayout, fixedOverflowWidgets),
 			overflowWidgetsDomNode: widgets,
 			tabSize: lang == 'python' ? 4 : 2,
+      scrollBeyondLastLine: true,
 			folding
 		})
 

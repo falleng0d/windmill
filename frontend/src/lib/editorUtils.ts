@@ -34,11 +34,12 @@ export function editorConfig(
 		bracketPairColorization: {
 			enabled: true
 		},
-		fontFamily: 'JetBrains Mono, Consolas, "Courier New", monospace',
-		fontSize: 18,
+		fontFamily: 'JetBrains Mono',
+		fontSize: 16,
 		rulers: [80],
 		cursorSurroundingLines: 10,
 		cursorStyle: 'block',
+		cursorBlinking: 'solid',
 		fontLigatures: true
 	}
 }
