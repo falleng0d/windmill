@@ -604,6 +604,7 @@ export const quickStyleProperties: Record<
 	tablecomponent: {
 		tableHeader: containerDefaultProps,
 		tableHeaderCell: containerDefaultProps,
+		tableHeaderCellText: containerDefaultProps,
 		tableActionHeaderCell: containerDefaultProps,
 		tableBody: containerDefaultProps,
 		tableCell: containerDefaultProps,

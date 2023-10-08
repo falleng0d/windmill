@@ -1286,6 +1286,7 @@ This is a paragraph.
 			container: { class: '', style: '' },
 			tableHeader: { class: '', style: '' },
 			tableHeaderCell: { class: '', style: '' },
+			tableHeaderCellText: { class: '', style: '' },
 			tableActionHeaderCell: { class: '', style: '' },
 			tableBody: { class: '', style: '' },
 			tableCell: { class: '', style: '' },

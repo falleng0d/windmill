@@ -321,7 +321,13 @@
 												class={twMerge('!p-0', css?.tableHeaderCell?.class ?? '')}
 												style={css?.tableHeaderCell?.style ?? ''}
 											>
-												<span class="block px-4 py-4 text-sm font-semibold border-b">
+												<span
+													class={twMerge(
+														'block px-4 py-4 text-sm font-semibold border-b',
+														css?.tableHeaderCellText?.class ?? ''
+													)}
+													style={css?.tableHeaderCellText?.style ?? ''}
+												>
 													{#if !header.isPlaceholder && component}
 														<svelte:component this={component} />
 													{/if}
@@ -338,7 +344,15 @@
 										)}
 										style={(css?.tableActionHeaderCell?.style || css?.tableHeaderCell?.style) ?? ''}
 									>
-										<span class="block px-4 py-4 text-sm font-semibold border-b"> Actions </span>
+										<span
+											class={twMerge(
+												'block px-4 py-4 text-sm font-semibold border-b',
+												css?.tableHeaderCellText?.class ?? ''
+											)}
+											style={css?.tableHeaderCellText?.style ?? ''}
+										>
+											Actions
+										</span>
 									</th>
 								{/if}
 							</tr>
@@ -363,11 +377,18 @@
 										{@const context = cell?.getContext()}
 										{@const isFirstCell = index === 0}
 										{@const isLastCell = index === safeVisibleCell(row).length - 1}
-										{@const cellStyle = isLastCell
-											? css?.tableLastCell?.style || css?.tableCell?.style
-											: isFirstCell
-											? css?.tableFirstCell?.style || css?.tableCell?.style
+										{@const firstCellStyle = isFirstCell
+											? css?.tableFirstCell?.style
 											: css?.tableCell?.style}
+										{@const lastCellStyle = isLastCell
+											? css?.tableLastCell?.style
+											: css?.tableCell?.style}
+										{@const cellStyle =
+											(isLastCell
+												? lastCellStyle
+												: isFirstCell
+												? firstCellStyle
+												: css?.tableCell?.style) || ''}
 										{@const cellClass = isLastCell
 											? css?.tableLastCell?.class || css?.tableCell?.class
 											: isFirstCell
