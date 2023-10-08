@@ -1,16 +1,42 @@
+use std::{collections::HashMap, fmt::Display, ops::Mul, str::FromStr, sync::Arc, time::Duration};
+
 use once_cell::sync::OnceCell;
+use serde::de::DeserializeOwned;
 use sqlx::{Pool, Postgres};
-use tokio::{join, sync::mpsc};
+use tokio::{
+    join,
+    sync::{mpsc, RwLock},
+};
 use uuid::Uuid;
+use windmill_api::{
+    oauth2::{build_oauth_clients, OAuthClient},
+    DEFAULT_BODY_LIMIT, IS_SECURE, OAUTH_CLIENTS, REQUEST_SIZE_LIMIT,
+};
 use windmill_common::{
     error,
+    global_settings::{
+        BASE_URL_SETTING, EXTRA_PIP_INDEX_URL_SETTING, LICENSE_KEY_SETTING,
+        NPM_CONFIG_REGISTRY_SETTING, OAUTH_SETTING, REQUEST_SIZE_LIMIT_SETTING,
+        RETENTION_PERIOD_SECS_SETTING,
+    },
     jobs::{JobKind, QueuedJob},
-    worker::{load_worker_config, reload_custom_tags_setting, WORKER_CONFIG},
-    METRICS_ENABLED,
+    server::load_server_config,
+    users::truncate_token,
+    worker::{load_worker_config, reload_custom_tags_setting, SERVER_CONFIG, WORKER_CONFIG},
+    BASE_URL, DB, METRICS_ENABLED,
 };
 use windmill_worker::{
-    create_token_for_owner, handle_job_error, AuthedClient, SCRIPT_TOKEN_EXPIRY,
+    create_token_for_owner, handle_job_error, AuthedClient, NPM_CONFIG_REGISTRY,
+    PIP_EXTRA_INDEX_URL, SCRIPT_TOKEN_EXPIRY,
 };
+
+#[cfg(feature = "enterprise")]
+use crate::ee::verify_license_key;
+
+#[cfg(feature = "enterprise")]
+use windmill_api::LICENSE_KEY_VALID;
+
+use crate::ee::set_license_key;
 
 lazy_static::lazy_static! {
     static ref ZOMBIE_JOB_TIMEOUT: String = std::env::var("ZOMBIE_JOB_TIMEOUT")
@@ -40,29 +66,20 @@ lazy_static::lazy_static! {
         "Number of jobs in the queue",
         &["tag"]
     ).unwrap();
+
+    static ref JOB_RETENTION_SECS: Arc<RwLock<i64>> = Arc::new(RwLock::new(0));
+
 }
 
-pub async fn monitor_db<R: rsmq_async::RsmqConnection + Send + Sync + Clone + 'static>(
+pub async fn initial_load(
     db: &Pool<Postgres>,
     tx: tokio::sync::broadcast::Sender<()>,
-    base_internal_url: &str,
-    rsmq: Option<R>,
     worker_mode: bool,
     server_mode: bool,
 ) {
-    let zombie_jobs_f = async {
-        if server_mode {
-            handle_zombie_jobs(db, base_internal_url, rsmq.clone()).await;
-        }
-    };
-    let expired_items_f = async {
-        if server_mode {
-            windmill_api::delete_expired_items(&db).await;
-        }
-    };
     let reload_worker_config_f = async {
         if worker_mode {
-            reload_worker_config(&db, tx).await;
+            reload_worker_config(&db, tx, false).await;
         }
     };
     let reload_custom_tags_f = async {
@@ -72,6 +89,330 @@ pub async fn monitor_db<R: rsmq_async::RsmqConnection + Send + Sync + Clone + 's
             }
         }
     };
+
+    let reload_base_url_f = async {
+        if let Err(e) = reload_base_url_setting(db).await {
+            tracing::error!("Error reloading base url: {:?}", e)
+        }
+    };
+
+    let reload_server_config_f = async {
+        if server_mode {
+            reload_server_config(&db).await;
+        }
+    };
+    let reload_retention_period_f = async {
+        if server_mode {
+            reload_retention_period_setting(&db).await;
+        }
+    };
+
+    let reload_request_size_f = async {
+        if server_mode {
+            reload_request_size(&db).await;
+        }
+    };
+
+    let reload_license_key_f = async {
+        #[cfg(feature = "enterprise")]
+        if let Err(e) = reload_license_key(&db).await {
+            tracing::error!("Error reloading license key: {:?}", e)
+        }
+    };
+
+    let reload_extra_pip_index_url_f = async {
+        if worker_mode {
+            reload_extra_pip_index_url_setting(&db).await;
+        }
+    };
+
+    let reload_npm_config_registry_f = async {
+        if worker_mode {
+            reload_npm_config_registry_setting(&db).await;
+        }
+    };
+
+    join!(
+        reload_worker_config_f,
+        reload_server_config_f,
+        reload_custom_tags_f,
+        reload_request_size_f,
+        reload_base_url_f,
+        reload_retention_period_f,
+        reload_license_key_f,
+        reload_extra_pip_index_url_f,
+        reload_npm_config_registry_f
+    );
+}
+
+pub async fn delete_expired_items(db: &DB) -> () {
+    let tokens_deleted_r: std::result::Result<Vec<String>, _> = sqlx::query_scalar(
+        "DELETE FROM token WHERE expiration <= now()
+        RETURNING concat(substring(token for 10), '*****')",
+    )
+    .fetch_all(db)
+    .await;
+
+    match tokens_deleted_r {
+        Ok(tokens) => {
+            if tokens.len() > 0 {
+                tracing::info!("deleted {} tokens: {:?}", tokens.len(), tokens)
+            }
+        }
+        Err(e) => tracing::error!("Error deleting token: {}", e.to_string()),
+    }
+
+    let pip_resolution_r = sqlx::query_scalar!(
+        "DELETE FROM pip_resolution_cache WHERE expiration <= now() RETURNING hash",
+    )
+    .fetch_all(db)
+    .await;
+
+    match pip_resolution_r {
+        Ok(res) => {
+            if res.len() > 0 {
+                tracing::info!("deleted {} pip_resolution: {:?}", res.len(), res)
+            }
+        }
+        Err(e) => tracing::error!("Error deleting pip_resolution: {}", e.to_string()),
+    }
+
+    let deleted_cache = sqlx::query_scalar!(
+            "DELETE FROM resource WHERE resource_type = 'cache' AND to_timestamp((value->>'expire')::int) < now() RETURNING path",
+        )
+        .fetch_all(db)
+        .await;
+
+    match deleted_cache {
+        Ok(res) => {
+            if res.len() > 0 {
+                tracing::info!("deleted {} cache resource: {:?}", res.len(), res)
+            }
+        }
+        Err(e) => tracing::error!("Error deleting cache resource {}", e.to_string()),
+    }
+
+    let job_retention_secs = *JOB_RETENTION_SECS.read().await;
+    if job_retention_secs > 0 {
+        let deleted_jobs = sqlx::query_scalar!(
+                "DELETE FROM completed_job WHERE started_at + ((duration_ms/1000 + $1) || ' s')::interval <= now() RETURNING id",
+                job_retention_secs
+            )
+            .fetch_all(db)
+            .await;
+
+        match deleted_jobs {
+            Ok(deleted_jobs) => {
+                if deleted_jobs.len() > 0 {
+                    tracing::info!(
+                        "deleted {} jobs completed JOB_RETENTION_SECS {} ago: {:?}",
+                        deleted_jobs.len(),
+                        job_retention_secs,
+                        deleted_jobs,
+                    )
+                }
+            }
+            Err(e) => tracing::error!("Error deleting jobs: {}", e.to_string()),
+        }
+    }
+}
+
+pub async fn reload_extra_pip_index_url_setting(db: &DB) {
+    if let Err(e) = reload_option_string_setting(
+        db,
+        EXTRA_PIP_INDEX_URL_SETTING,
+        "PIP_EXTRA_INDEX_URL",
+        PIP_EXTRA_INDEX_URL.clone(),
+    )
+    .await
+    {
+        tracing::error!("Error reloading extra_pip_index_url period: {:?}", e)
+    }
+}
+
+pub async fn reload_npm_config_registry_setting(db: &DB) {
+    if let Err(e) = reload_option_string_setting(
+        db,
+        NPM_CONFIG_REGISTRY_SETTING,
+        "NPM_CONFIG_REGISTRY",
+        NPM_CONFIG_REGISTRY.clone(),
+    )
+    .await
+    {
+        tracing::error!("Error reloading npm_config_registry period: {:?}", e)
+    }
+}
+
+pub async fn reload_retention_period_setting(db: &DB) {
+    if let Err(e) = reload_setting(
+        db,
+        RETENTION_PERIOD_SECS_SETTING,
+        "JOB_RETENTION_SECS",
+        60 * 60 * 24 * 60,
+        JOB_RETENTION_SECS.clone(),
+        |x| x,
+    )
+    .await
+    {
+        tracing::error!("Error reloading retention period: {:?}", e)
+    }
+}
+
+pub async fn reload_request_size(db: &DB) {
+    if let Err(e) = reload_setting(
+        db,
+        REQUEST_SIZE_LIMIT_SETTING,
+        "REQUEST_SIZE_LIMIT",
+        DEFAULT_BODY_LIMIT,
+        REQUEST_SIZE_LIMIT.clone(),
+        |x| x.mul(1024 * 1024),
+    )
+    .await
+    {
+        tracing::error!("Error reloading retention period: {:?}", e)
+    }
+}
+
+pub async fn reload_license_key(db: &DB) -> error::Result<()> {
+    let q = sqlx::query!(
+        "SELECT value FROM global_settings WHERE name = $1",
+        LICENSE_KEY_SETTING
+    )
+    .fetch_optional(db)
+    .await?;
+
+    let mut value = std::env::var("LICENSE_KEY")
+        .ok()
+        .and_then(|x| x.parse::<String>().ok())
+        .unwrap_or(String::new());
+
+    if let Some(q) = q {
+        if let Ok(v) = serde_json::from_value::<String>(q.value.clone()) {
+            tracing::info!(
+                "Loaded setting LICENSE_KEY from db config: {}",
+                truncate_token(&v)
+            );
+            value = v;
+        } else {
+            tracing::error!("Could not parse LICENSE_KEY found: {:#?}", &q.value);
+        }
+    };
+
+    set_license_key(value).await?;
+
+    Ok(())
+}
+
+pub async fn reload_option_string_setting(
+    db: &DB,
+    setting_name: &str,
+    std_env_var: &str,
+    lock: Arc<RwLock<Option<String>>>,
+) -> error::Result<()> {
+    let q = sqlx::query!(
+        "SELECT value FROM global_settings WHERE name = $1",
+        setting_name
+    )
+    .fetch_optional(db)
+    .await?;
+
+    let mut value = std::env::var(std_env_var).ok();
+
+    if let Some(q) = q {
+        if let Ok(v) = serde_json::from_value::<String>(q.value.clone()) {
+            tracing::info!(
+                "Loaded setting {setting_name} from db config: {:#?}",
+                &q.value
+            );
+            value = Some(v)
+        } else {
+            tracing::error!("Could not parse {setting_name} found: {:#?}", &q.value);
+        }
+    };
+
+    {
+        if value.is_none() {
+            tracing::info!("Loaded {setting_name} setting to None");
+        }
+        let mut l = lock.write().await;
+        *l = value;
+    }
+
+    Ok(())
+}
+
+pub async fn reload_setting<T: FromStr + DeserializeOwned + Display>(
+    db: &DB,
+    setting_name: &str,
+    std_env_var: &str,
+    default: T,
+    lock: Arc<RwLock<T>>,
+    transformer: fn(T) -> T,
+) -> error::Result<()> {
+    let q = sqlx::query!(
+        "SELECT value FROM global_settings WHERE name = $1",
+        setting_name
+    )
+    .fetch_optional(db)
+    .await?;
+
+    let mut value = std::env::var(std_env_var)
+        .ok()
+        .and_then(|x| x.parse::<T>().ok())
+        .unwrap_or(default);
+
+    if let Some(q) = q {
+        if let Ok(v) = serde_json::from_value::<T>(q.value.clone()) {
+            tracing::info!(
+                "Loaded setting {setting_name} from db config: {:#?}",
+                &q.value
+            );
+            value = transformer(v);
+        } else {
+            tracing::error!("Could not parse {setting_name} found: {:#?}", &q.value);
+        }
+    };
+
+    {
+        let mut l = lock.write().await;
+        *l = value;
+    }
+
+    Ok(())
+}
+
+pub async fn monitor_db<R: rsmq_async::RsmqConnection + Send + Sync + Clone + 'static>(
+    db: &Pool<Postgres>,
+    base_internal_url: &str,
+    rsmq: Option<R>,
+    server_mode: bool,
+) {
+    let zombie_jobs_f = async {
+        if server_mode {
+            handle_zombie_jobs(db, base_internal_url, rsmq.clone()).await;
+        }
+    };
+    let expired_items_f = async {
+        if server_mode {
+            delete_expired_items(&db).await;
+        }
+    };
+
+    let verify_license_key_f = async {
+        #[cfg(feature = "enterprise")]
+        if let Err(e) = verify_license_key().await {
+            tracing::error!("Error verifying license key: {:?}", e);
+            let mut l = LICENSE_KEY_VALID.write().await;
+            *l = false;
+        } else {
+            let is_valid = LICENSE_KEY_VALID.read().await.clone();
+            if !is_valid {
+                let mut l = LICENSE_KEY_VALID.write().await;
+                *l = true;
+            }
+        }
+    };
+
     let expose_queue_metrics_f = async {
         if *METRICS_ENABLED && server_mode {
             expose_queue_metrics(&db).await;
@@ -80,9 +421,8 @@ pub async fn monitor_db<R: rsmq_async::RsmqConnection + Send + Sync + Clone + 's
     join!(
         expired_items_f,
         zombie_jobs_f,
-        reload_worker_config_f,
-        reload_custom_tags_f,
-        expose_queue_metrics_f
+        expose_queue_metrics_f,
+        verify_license_key_f
     );
 }
 
@@ -104,7 +444,22 @@ pub async fn expose_queue_metrics(db: &Pool<Postgres>) {
     }
 }
 
-pub async fn reload_worker_config(db: &Pool<Postgres>, tx: tokio::sync::broadcast::Sender<()>) {
+pub async fn reload_server_config(db: &Pool<Postgres>) {
+    let config = load_server_config(&db).await;
+    if let Err(e) = config {
+        tracing::error!("Error reloading server config: {:?}", e)
+    } else {
+        let mut wc = SERVER_CONFIG.write().await;
+        tracing::info!("Reloading server config...");
+        *wc = config.unwrap()
+    }
+}
+
+pub async fn reload_worker_config(
+    db: &DB,
+    tx: tokio::sync::broadcast::Sender<()>,
+    kill_if_change: bool,
+) {
     let config = load_worker_config(&db).await;
     if let Err(e) = config {
         tracing::error!("Error reloading worker config: {:?}", e)
@@ -112,9 +467,26 @@ pub async fn reload_worker_config(db: &Pool<Postgres>, tx: tokio::sync::broadcas
         let wc = WORKER_CONFIG.read().await;
         let config = config.unwrap();
         if *wc != config {
-            if (*wc).dedicated_worker != config.dedicated_worker {
-                tracing::info!("Dedicated worker config changed, sending killpill. Expecting to be restarted by supervisor.");
-                let _ = tx.send(());
+            if kill_if_change {
+                if (*wc).dedicated_worker != config.dedicated_worker {
+                    tracing::info!("Dedicated worker config changed, sending killpill. Expecting to be restarted by supervisor.");
+                    let _ = tx.send(());
+                }
+
+                if (*wc).init_bash != config.init_bash {
+                    tracing::info!("Init bash config changed, sending killpill. Expecting to be restarted by supervisor.");
+                    let _ = tx.send(());
+                }
+
+                if (*wc).cache_clear != config.cache_clear {
+                    tracing::info!("Cache clear changed, sending killpill. Expecting to be restarted by supervisor.");
+                    let _ = tx.send(());
+                    tracing::info!("Waiting 5 seconds to allow others workers to start potential jobs that depend on a potential shared cache volume");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    if let Err(e) = windmill_worker::common::clean_cache().await {
+                        tracing::error!("Error cleaning the cache: {e}");
+                    }
+                }
             }
             drop(wc);
 
@@ -123,6 +495,77 @@ pub async fn reload_worker_config(db: &Pool<Postgres>, tx: tokio::sync::broadcas
             *wc = config
         }
     }
+}
+
+pub async fn reload_base_url_setting(db: &DB) -> error::Result<()> {
+    let q_base_url = sqlx::query!(
+        "SELECT value FROM global_settings WHERE name = $1",
+        BASE_URL_SETTING
+    )
+    .fetch_optional(db)
+    .await?;
+
+    let base_url = if let Some(q) = q_base_url {
+        if let Ok(v) = serde_json::from_value::<String>(q.value.clone()) {
+            v
+        } else {
+            tracing::error!(
+                "Could not parse base_url setting as a string, found: {:#?}",
+                &q.value
+            );
+            std::env::var("BASE_URL")
+                .ok()
+                .unwrap_or_else(|| "http://localhost".to_string())
+        }
+    } else {
+        std::env::var("BASE_URL")
+            .ok()
+            .unwrap_or_else(|| "http://localhost".to_string())
+    };
+
+    let q_oauth = sqlx::query!(
+        "SELECT value FROM global_settings WHERE name = $1",
+        OAUTH_SETTING
+    )
+    .fetch_optional(db)
+    .await?;
+
+    let oauths = if let Some(q) = q_oauth {
+        if let Ok(v) =
+            serde_json::from_value::<Option<HashMap<String, OAuthClient>>>(q.value.clone())
+        {
+            v
+        } else {
+            tracing::error!(
+                "Could not parse oauth setting as a json, found: {:#?}",
+                &q.value
+            );
+            None
+        }
+    } else {
+        None
+    };
+
+    let is_secure = base_url.starts_with("https://");
+
+    {
+        let mut l = OAUTH_CLIENTS.write().await;
+        *l = build_oauth_clients(&base_url, oauths)
+        .map_err(|e| tracing::error!("Error building oauth clients (is the oauth.json mounted and in correct format? Use '{}' as minimal oauth.json): {}", "{}", e))
+        .unwrap();
+    }
+
+    {
+        let mut l = BASE_URL.write().await;
+        *l = base_url
+    }
+
+    {
+        let mut l = IS_SECURE.write().await;
+        *l = is_secure;
+    }
+
+    Ok(())
 }
 
 async fn handle_zombie_jobs<R: rsmq_async::RsmqConnection + Send + Sync + Clone>(

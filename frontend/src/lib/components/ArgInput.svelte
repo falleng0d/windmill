@@ -114,7 +114,10 @@
 	}
 
 	function evalValueToRaw() {
-		rawValue = inputCat === 'object' ? JSON.stringify(value, null, 2) : undefined
+		rawValue =
+			inputCat === 'object' || inputCat === 'resource-object'
+				? JSON.stringify(value, null, 2)
+				: undefined
 	}
 
 	evalValueToRaw()
@@ -286,7 +289,7 @@
 									{#if i < itemsLimit}
 										<div class="flex max-w-md mt-1 w-full items-center">
 											{#if itemsType?.type == 'number'}
-												<input type="number" bind:value={v} />
+												<input type="number" bind:value={v} id="arg-input-number-array" />
 											{:else if itemsType?.type == 'string' && itemsType?.contentEncoding == 'base64'}
 												<input
 													type="file"
@@ -345,12 +348,15 @@
 								}
 								value = value.concat('')
 							}}
+							id="arg-input-add-item"
 						>
 							<Icon data={faPlus} class="mr-2" />
 							Add item
 						</Button>
 					</div>
 				</div>
+			{:else if inputCat == 'resource-object' && resourceTypes == undefined}
+				<span class="text-2xs text-tertiary">Loading resource types...</span>
 			{:else if inputCat == 'resource-object' && (resourceTypes == undefined || (format.split('-').length > 1 && resourceTypes.includes(format.substring('resource-'.length))))}
 				<ObjectResourceInput {disablePortal} {format} bind:value {showSchemaExplorer} />
 			{:else if inputCat == 'object' || inputCat == 'resource-object'}

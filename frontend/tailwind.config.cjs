@@ -499,7 +499,10 @@ const config = {
 					'--vscode-editorHoverWidget-foreground': '#616161',
 					'--vscode-editorHoverWidget-border': '#c8c8c8',
 					'--vscode-editorHoverWidget-statusBarBackground': '#e7e7e7',
-
+					'--vscode-editorSuggestWidget-foreground': '#eeffff',
+					'--vscode-editorSuggestWidget-highlightForeground': '#80cbc4',
+					'--vscode-editorSuggestWidget-selectedBackground': 'rgba(0, 0, 0, 0.31)',
+					
 					[`@media (min-width: ${theme('screens.qhd')})`]: {
 						fontSize: theme('fontSize.lg')
 					},
@@ -583,7 +586,6 @@ const config = {
 					fontSize: '18px',
 					fontWeight: theme('fontWeight.semibold'),
 					lineHeight: '1.3',
-					color: theme('colors.gray.600'),
 					[`@media (min-width: ${theme('screens.qhd')})`]: {
 						fontSize: '20px'
 					}
@@ -592,7 +594,6 @@ const config = {
 					fontSize: '16px',
 					fontWeight: theme('fontWeight.semibold'),
 					lineHeight: '1.5',
-					color: theme('colors.gray.600'),
 					[`@media (min-width: ${theme('screens.qhd')})`]: {
 						fontSize: '18px'
 					}
@@ -601,7 +602,6 @@ const config = {
 					fontSize: '16px',
 					fontWeight: theme('fontWeight.medium'),
 					lineHeight: '1.5',
-					color: theme('colors.gray.600'),
 					[`@media (min-width: ${theme('screens.qhd')})`]: {
 						fontSize: '18px'
 					}
@@ -789,7 +789,7 @@ const config = {
 					overflow: 'auto !important'
 				},
 				'.splitpanes__splitter': {
-					backgroundColor: lightTheme.border + ' !important',
+					backgroundColor: 'rgb(243 244 246) !important',
 					margin: '0 !important',
 					border: 'none !important',
 					'&::after': {

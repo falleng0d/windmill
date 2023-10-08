@@ -9,12 +9,12 @@
 	import Toggle from '$lib/components/Toggle.svelte'
 	import Tooltip from '$lib/components/Tooltip.svelte'
 	import WorkspaceGroup from '$lib/components/WorkspaceGroup.svelte'
-	import { WorkerService, type WorkerPing, SettingService } from '$lib/gen'
+	import { WorkerService, type WorkerPing, SettingService, ConfigService } from '$lib/gen'
 	import { enterpriseLicense, superadmin } from '$lib/stores'
 	import { sendUserToast } from '$lib/toast'
 	import { displayDate, groupBy, truncate } from '$lib/utils'
 	import { faPlus } from '@fortawesome/free-solid-svg-icons'
-	import { Loader2, Pen, X } from 'lucide-svelte'
+	import { AlertTriangle, Loader2, Pen, X } from 'lucide-svelte'
 	import { onDestroy, onMount } from 'svelte'
 
 	let workers: WorkerPing[] | undefined = undefined
@@ -53,10 +53,10 @@
 	async function loadWorkerGroups(): Promise<void> {
 		try {
 			workerGroups = Object.fromEntries(
-				(await WorkerService.listWorkerGroups()).map((x) => [x.name, x.config])
+				(await ConfigService.listWorkerGroups()).map((x) => [x.name.substring(8), x.config])
 			)
 		} catch (err) {
-			sendUserToast(`Could not load workers: ${err}`, true)
+			sendUserToast(`Could not load worker groups: ${err}`, true)
 		}
 	}
 
@@ -71,8 +71,10 @@
 		secondInterval = setInterval(() => {
 			timeSinceLastPing += 1
 		}, 1000)
-		loadGlobalCache()
-		loadCustomTags()
+		if ($superadmin) {
+			loadGlobalCache()
+			loadCustomTags()
+		}
 	})
 
 	async function loadGlobalCache() {
@@ -103,7 +105,7 @@
 	let newGroupName = ''
 
 	async function addGroup() {
-		await WorkerService.updateWorkerGroup({ name: newGroupName, requestBody: {} })
+		await ConfigService.updateConfig({ name: 'worker__' + newGroupName, requestBody: {} })
 		loadWorkerGroups()
 	}
 
@@ -168,10 +170,10 @@
 							{#if customTags == undefined}
 								<Loader2 class="animate-spin" />
 							{:else}
-								<div class="flex flex-col">
+								<div class="flex flex-wrap gap-3 gap-y-2">
 									{#each customTags as customTag}
-										<div class="font-mono flex items-center gap-2 w-full">
-											<div class="w-full">- {customTag}</div>
+										<div class="flex gap-0.5 items-center"
+											><div class="text-2xs p-1 rounded border text-primary">{customTag}</div>
 											<button
 												class="z-10 rounded-full p-1 duration-200 hover:bg-gray-200"
 												aria-label="Remove item"
@@ -184,9 +186,9 @@
 													sendUserToast('Tag removed')
 												}}
 											>
-												<X size={14} />
-											</button>
-										</div>
+												<X size={12} />
+											</button></div
+										>
 									{/each}
 								</div>
 								<input type="text" bind:value={newTag} />
@@ -244,23 +246,44 @@
 			<div />
 			{#if $superadmin}
 				<div class="flex flex-row items-center">
-					<input class="mr-2 h-full" placeholder="New group name" bind:value={newGroupName} />
-					<Button
-						size="sm"
-						startIcon={{ icon: faPlus }}
-						disabled={!newGroupName}
-						on:click={addGroup}
+					<Popup
+						floatingConfig={{ strategy: 'absolute', placement: 'bottom-end' }}
+						containerClasses="border rounded-lg shadow-lg p-4 bg-surface"
 					>
-						New worker group config
-					</Button>
-					<Tooltip>Worker Group configs are propagated to every workers in the worker group</Tooltip
-					>
+						<svelte:fragment slot="button">
+							<div class="flex items-center">
+								<Button size="sm" startIcon={{ icon: faPlus }} nonCaptureEvent
+									>New worker group config</Button
+								>
+								<Tooltip
+									>Worker Group configs are propagated to every workers in the worker group</Tooltip
+								>
+							</div>
+						</svelte:fragment>
+						<div class="flex flex-col gap-2">
+							<input class="mr-2 h-full" placeholder="New group name" bind:value={newGroupName} />
+
+							{#if !$enterpriseLicense}
+								<div class="flex items-center whitespace-nowrap text-yellow-600 gap-2">
+									<AlertTriangle size={16} />
+									EE only
+								</div>
+							{/if}
+							<Button
+								size="sm"
+								startIcon={{ icon: faPlus }}
+								disabled={!newGroupName || !$enterpriseLicense}
+								on:click={addGroup}
+							>
+								Create
+							</Button>
+						</div>
+					</Popup>
 				</div>
 			{/if}</div
 		>
-		{#each groupedWorkers as worker_group, i}
+		{#each groupedWorkers as worker_group}
 			<WorkspaceGroup
-				top={i != 0}
 				name={worker_group[0]}
 				config={(workerGroups ?? {})[worker_group[0]]}
 				on:reload={() => {
@@ -335,9 +358,8 @@
 
 		<div class="pb-4" />
 
-		{#each Object.entries(workerGroups ?? {}).filter((x) => !groupedWorkers.some((y) => y[0] == x[0])) as worker_group, i}
+		{#each Object.entries(workerGroups ?? {}).filter((x) => !groupedWorkers.some((y) => y[0] == x[0])) as worker_group}
 			<WorkspaceGroup
-				top={i != 0 || groupedWorkers?.length > 0}
 				on:reload={() => {
 					loadWorkerGroups()
 				}}

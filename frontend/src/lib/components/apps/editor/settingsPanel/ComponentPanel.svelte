@@ -34,6 +34,9 @@
 	import GridGroup from './GridGroup.svelte'
 	import { secondaryMenuLeft } from './secondaryMenu'
 
+	import ComponentControl from './ComponentControl.svelte'
+	import GridAgGridLicenseKey from './GridAgGridLicenseKey.svelte'
+
 	export let componentSettings: { item: GridItem; parent: string | undefined } | undefined =
 		undefined
 	export let onDelete: (() => void) | undefined = undefined
@@ -298,6 +301,9 @@
 				{/key}
 			</PanelSection>
 		{/if}
+
+		<ComponentControl type={component.type} />
+
 		{#if componentSettings.item.data.type === 'tabscomponent'}
 			<GridTab
 				bind:tabs={componentSettings.item.data.tabs}
@@ -305,6 +311,8 @@
 				bind:component={componentSettings.item.data}
 				canDisableTabs
 			/>
+		{:else if componentSettings.item.data.type === 'aggridcomponentee'}
+			<GridAgGridLicenseKey bind:license={componentSettings.item.data.license} />
 		{:else if componentSettings.item.data.type === 'steppercomponent'}
 			<GridTab
 				bind:tabs={componentSettings.item.data.tabs}
@@ -314,7 +322,7 @@
 		{:else if componentSettings.item.data.type === 'containercomponent'}
 			<GridGroup
 				bind:groupFields={componentSettings.item.data.groupFields}
-				bind:component={componentSettings.item.data}
+				item={componentSettings.item}
 			/>
 		{:else if componentSettings.item.data.type === 'conditionalwrapper'}
 			<GridCondition

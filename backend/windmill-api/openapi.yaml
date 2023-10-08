@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 
 info:
-  version: 1.174.0
+  version: 1.181.0
   title: Windmill API
 
   contact:
@@ -575,6 +575,81 @@ paths:
             application/json:
               schema: {}
 
+  /settings/test_smtp:
+    post:
+      summary: test smtp
+      operationId: testSmtp
+      tags:
+        - setting
+      requestBody:
+        description: test smtp payload
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to:
+                  type: string
+                smtp:
+                  type: object
+                  properties:
+                    host:
+                      type: string
+                    username:
+                      type: string
+                    password:
+                      type: string
+                    port:
+                      type: integer
+                    from:
+                      type: string
+                    tls_implicit:
+                      type: boolean
+                  required:
+                    - host
+                    - username
+                    - password
+                    - port
+                    - from
+                    - tls_implicit
+              required:
+                - to
+                - smtp
+      responses:
+        "200":
+          description: status
+          content:
+            text/plain::
+              schema:
+                type: string
+
+  /settings/test_license_key:
+    post:
+      summary: test license key
+      operationId: testLicenseKey
+      tags:
+        - setting
+      requestBody:
+        description: test license key
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                license_key:
+                  type: string
+              required:
+                - license_key
+      responses:
+        "200":
+          description: status
+          content:
+            text/plain::
+              schema:
+                type: string
+
   /users/email:
     get:
       summary: get current user email (if logged in)
@@ -598,6 +673,45 @@ paths:
       responses:
         "200":
           description: free usage
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /users/tutorial_progress:
+    get:
+      summary: get tutorial progress
+      operationId: getTutorialProgress
+      tags:
+        - user
+      responses:
+        "200":
+          description: tutorial progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  progress:
+                    type: integer
+    post:
+      summary: update tutorial progress
+      operationId: updateTutorialProgress
+      tags:
+        - user
+      requestBody:
+        description: progress update
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                progress:
+                  type: integer
+      responses:
+        "200":
+          description: tutorial progress
           content:
             text/plain:
               schema:
@@ -1040,8 +1154,12 @@ paths:
                     type: string
                   openai_resource_path:
                     type: string
+                  code_completion_enabled:
+                    type: boolean
                   error_handler:
                     type: string
+                required:
+                  - code_completion_enabled
 
   /w/{workspace}/workspaces/get_deploy_to:
     get:
@@ -1194,24 +1312,28 @@ paths:
               schema:
                 type: string
 
-  /w/{workspace}/workspaces/edit_openai_resource_path:
+  /w/{workspace}/workspaces/edit_copilot_config:
     post:
-      summary: edit OpenAI resource path
-      operationId: editOpenaiResourcePath
+      summary: edit copilot config
+      operationId: editCopilotConfig
       tags:
         - workspace
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
       requestBody:
-        description: WorkspaceOpenaiResourcePath
+        description: WorkspaceCopilotConfig
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - code_completion_enabled
               properties:
                 openai_resource_path:
                   type: string
+                code_completion_enabled:
+                  type: boolean
       responses:
         "200":
           description: status
@@ -1220,10 +1342,10 @@ paths:
               schema:
                 type: string
 
-  /w/{workspace}/workspaces/exists_openai_resource_path:
+  /w/{workspace}/workspaces/get_copilot_info:
     get:
-      summary: OpenAI resource path exists
-      operationId: existsOpenaiResourcePath
+      summary: get copilot info
+      operationId: getCopilotInfo
       tags:
         - workspace
       parameters:
@@ -1235,7 +1357,15 @@ paths:
           content:
             text/plain:
               schema:
-                type: boolean
+                type: object
+                properties:
+                  exists_openai_resource_path:
+                    type: boolean
+                  code_completion_enabled:
+                    type: boolean
+                required:
+                  - exists_openai_resource_path
+                  - code_completion_enabled
 
   /w/{workspace}/workspaces/edit_error_handler:
     post:
@@ -1934,6 +2064,12 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/Path"
+        - name: job_id
+          description: job id
+          in: query
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: resource value
@@ -2003,6 +2139,31 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ListableResource"
+
+  /w/{workspace}/resources/list_search:
+    get:
+      summary: list resources for search
+      operationId: listSearchResource
+      tags:
+        - resource
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: resource list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    path:
+                      type: string
+                    value: {}
+                  required:
+                    - path
+                    - value
 
   /w/{workspace}/resources/list_names/{name}:
     get:
@@ -2425,6 +2586,32 @@ paths:
                       type: string
                   required:
                     - id
+
+  /w/{workspace}/scripts/list_search:
+    get:
+      summary: list scripts for search
+      operationId: listSearchScript
+      tags:
+        - script
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: script list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    path:
+                      type: string
+                    content:
+                      type: string
+                  required:
+                    - path
+                    - content
 
   /w/{workspace}/scripts/list:
     get:
@@ -3071,6 +3258,31 @@ paths:
                 items:
                   type: string
 
+  /w/{workspace}/flows/list_search:
+    get:
+      summary: list flows for search
+      operationId: listSearchFlow
+      tags:
+        - flow
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: flow list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    path:
+                      type: string
+                    value: {}
+                  required:
+                    - path
+                    - value
+
   /w/{workspace}/flows/list:
     get:
       summary: list all available flows
@@ -3373,6 +3585,31 @@ paths:
             text/javascript:
               schema:
                 type: string
+
+  /w/{workspace}/apps/list_search:
+    get:
+      summary: list apps for search
+      operationId: listSearchApp
+      tags:
+        - app
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: app list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    path:
+                      type: string
+                    value: {}
+                  required:
+                    - path
+                    - value
 
   /w/{workspace}/apps/list:
     get:
@@ -4068,6 +4305,7 @@ paths:
         - $ref: "#/components/parameters/StartedBefore"
         - $ref: "#/components/parameters/StartedAfter"
         - $ref: "#/components/parameters/CreatedOrStartedBefore"
+        - $ref: "#/components/parameters/Running"
         - $ref: "#/components/parameters/CreatedOrStartedAfter"
         - $ref: "#/components/parameters/JobKinds"
         - $ref: "#/components/parameters/ArgsFilter"
@@ -5268,15 +5506,15 @@ paths:
                 items:
                   $ref: "#/components/schemas/WorkerPing"
 
-  /workers/list_worker_groups:
+  /configs/list_worker_groups:
     get:
-      summary: list workers
+      summary: list worker groups
       operationId: listWorkerGroups
       tags:
-        - worker
+        - config
       responses:
         "200":
-          description: a list of workers
+          description: a list of worker group configs
           content:
             application/json:
               schema:
@@ -5291,12 +5529,27 @@ paths:
                     - name
                     - config
 
-  /workers/worker_group/{name}:
-    post:
-      summary: Update Worker Group
-      operationId: updateWorkerGroup
+  /configs/get/{name}:
+    get:
+      summary: get config
+      operationId: get config
       tags:
-        - worker
+        - config
+      parameters:
+        - $ref: "#/components/parameters/Name"
+      responses:
+        "200":
+          description: a config
+          content:
+            application/json:
+              schema: {}
+
+  /configs/update/{name}:
+    post:
+      summary: Update config
+      operationId: updateConfig
+      tags:
+        - config
       parameters:
         - $ref: "#/components/parameters/Name"
       requestBody:
@@ -5313,15 +5566,15 @@ paths:
               schema:
                 type: string
     delete:
-      summary: Delete Worker Group
-      operationId: deleteWorkerGroup
+      summary: Delete Config
+      operationId: deleteConfig
       tags:
-        - worker
+        - config
       parameters:
         - $ref: "#/components/parameters/Name"
       responses:
         "200":
-          description: Delete a worker group
+          description: Delete config
           content:
             text/plain:
               schema:
@@ -6752,7 +7005,7 @@ components:
             - "workspaces.edit_deploy_to"
             - "workspaces.edit_auto_invite_domain"
             - "workspaces.edit_webhook"
-            - "workspaces.edit_openai_resource_path"
+            - "workspaces.edit_copilot_config"
             - "workspaces.edit_error_handler"
             - "workspaces.create"
             - "workspaces.update"

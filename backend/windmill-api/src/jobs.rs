@@ -13,7 +13,6 @@ use crate::{
     users::{check_scopes, require_owner_of_path, OptAuthed},
     utils::require_super_admin,
     variables::get_workspace_key,
-    BASE_URL,
 };
 use anyhow::Context;
 use axum::{
@@ -24,6 +23,7 @@ use axum::{
 };
 use base64::Engine;
 use bytes::Bytes;
+use chrono::Utc;
 use hmac::Mac;
 use hyper::{header::CONTENT_TYPE, http, HeaderMap, Request, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -33,7 +33,8 @@ use sqlx::{query_scalar, types::Uuid, FromRow, Postgres, Transaction};
 use tower_http::cors::{Any, CorsLayer};
 use urlencoding::encode;
 use windmill_audit::{audit_log, ActionKind};
-use windmill_common::worker::CUSTOM_TAGS_PER_WORKSPACE;
+use windmill_common::worker::{CUSTOM_TAGS_PER_WORKSPACE, SERVER_CONFIG};
+use windmill_common::BASE_URL;
 use windmill_common::{
     db::UserDB,
     error::{self, to_anyhow, Error},
@@ -41,7 +42,7 @@ use windmill_common::{
     flows::FlowValue,
     jobs::{script_path_to_payload, JobKind, JobPayload, QueuedJob, RawCode},
     oauth2::HmacSha256,
-    scripts::{ScriptHash, ScriptLang},
+    scripts::{Script, ScriptHash, ScriptLang},
     users::username_to_permissioned_as,
     utils::{not_found_if_none, now_from_db, paginate, require_admin, Pagination, StripPath},
 };
@@ -105,7 +106,7 @@ pub fn workspaced_service() -> Router {
                 .layer(cors.clone()),
         )
         .route("/run/preview", post(run_preview_job))
-        .route("/add_noop_jobs/:n", post(add_noop_jobs))
+        .route("/add_batch_jobs/:n", post(add_batch_jobs))
         .route("/run/preview_flow", post(run_preview_flow_job))
         .route("/list", get(list_jobs))
         .route("/queue/list", get(list_queue_jobs))
@@ -347,8 +348,12 @@ async fn get_job(
     Extension(db): Extension<DB>,
     Path((w_id, id)): Path<(String, Uuid)>,
 ) -> error::Result<Response> {
-    let cjob_option =
-        sqlx::query("SELECT * FROM completed_job WHERE id = $1 AND workspace_id = $2")
+    let cjob_option = sqlx::query("SELECT 
+        id, workspace_id, parent_job, created_by, created_at, duration_ms, success, script_hash, script_path, 
+        args, CASE WHEN pg_column_size(result) < 2000000 THEN result ELSE '\"WINDMILL_TOO_BIG\"'::jsonb END as result, logs, deleted, raw_code, canceled, canceled_by, canceled_reason, job_kind, env_id,
+        schedule_path, permissioned_as, flow_status, raw_flow, is_flow_step, language, started_at, is_skipped,
+        raw_lock, email, visible_to_owner, mem_peak, tag 
+        FROM completed_job WHERE id = $1 AND workspace_id = $2")
             .bind(id)
             .bind(&w_id)
             .fetch_optional(&db)
@@ -779,44 +784,53 @@ async fn list_jobs(
     let (per_page, offset) = paginate(pagination);
     let lqc = lq.clone();
 
-    let sqlc = list_completed_jobs_query(
-        &w_id,
-        per_page + offset,
-        0,
-        &ListCompletedQuery { order_desc: Some(true), ..lqc },
-        &[
-            "'CompletedJob' as typ",
-            "id",
-            "workspace_id",
-            "parent_job",
-            "created_by",
-            "created_at",
-            "started_at",
-            "null as scheduled_for",
-            "null as running",
-            "script_hash",
-            "script_path",
-            "null as args",
-            "duration_ms",
-            "success",
-            "deleted",
-            "canceled",
-            "canceled_by",
-            "job_kind",
-            "schedule_path",
-            "permissioned_as",
-            "is_flow_step",
-            "language",
-            "is_skipped",
-            "email",
-            "visible_to_owner",
-            "null as suspend",
-            "mem_peak",
-            "tag",
-            "null as concurrent_limit",
-            "null as concurrency_time_window_s",
-        ],
-    );
+    if lq.success.is_some() && lq.running.is_some_and(|x| x) {
+        return Err(error::Error::BadRequest(
+            "cannot specify both success and running".to_string(),
+        ));
+    }
+    let sqlc = if lq.running.is_none() {
+        Some(list_completed_jobs_query(
+            &w_id,
+            per_page + offset,
+            0,
+            &ListCompletedQuery { order_desc: Some(true), ..lqc },
+            &[
+                "'CompletedJob' as typ",
+                "id",
+                "workspace_id",
+                "parent_job",
+                "created_by",
+                "created_at",
+                "started_at",
+                "null as scheduled_for",
+                "null as running",
+                "script_hash",
+                "script_path",
+                "null as args",
+                "duration_ms",
+                "success",
+                "deleted",
+                "canceled",
+                "canceled_by",
+                "job_kind",
+                "schedule_path",
+                "permissioned_as",
+                "is_flow_step",
+                "language",
+                "is_skipped",
+                "email",
+                "visible_to_owner",
+                "null as suspend",
+                "mem_peak",
+                "tag",
+                "null as concurrent_limit",
+                "null as concurrency_time_window_s",
+            ],
+        ))
+    } else {
+        None
+    };
 
     let sql = if lq.success.is_none() {
         let sqlq = list_queue_jobs_query(
@@ -832,7 +846,7 @@ async fn list_jobs(
                 created_after: lq.created_after,
                 created_or_started_before: lq.created_or_started_before,
                 created_or_started_after: lq.created_or_started_after,
-                running: None,
+                running: lq.running,
                 parent_job: lq.parent_job,
                 order_desc: Some(true),
                 job_kinds: lq.job_kinds,
@@ -875,15 +889,19 @@ async fn list_jobs(
             ],
         );
 
-        format!(
-            "{} UNION ALL {} LIMIT {} OFFSET {};",
-            &sqlq.subquery()?,
-            &sqlc.subquery()?,
-            per_page,
-            offset
-        )
+        if let Some(sqlc) = sqlc {
+            format!(
+                "{} UNION ALL {} LIMIT {} OFFSET {};",
+                &sqlq.subquery()?,
+                &sqlc.subquery()?,
+                per_page,
+                offset
+            )
+        } else {
+            sqlq.query()?
+        }
     } else {
-        sqlc.query()?
+        sqlc.unwrap().query()?
     };
     let mut tx = user_db.begin(&authed).await?;
     let jobs: Vec<UnifiedJob> = sqlx::query_as(&sql).fetch_all(&mut *tx).await?;
@@ -1295,7 +1313,8 @@ pub async fn get_resume_urls(
         .map(|x| format!("?approver={}", encode(x)))
         .unwrap_or_else(String::new);
 
-    let base_url = BASE_URL.as_str();
+    let base_url_str = BASE_URL.read().await.clone();
+    let base_url = base_url_str.as_str();
     let res = ResumeUrls {
         approvalPage: format!(
             "{base_url}/approve/{w_id}/{job_id}/{resume_id}/{signature}{approver}"
@@ -1634,6 +1653,19 @@ async fn check_tag_available_for_workspace(w_id: &str, tag: &Option<String>) -> 
     }
 }
 
+#[cfg(feature = "enterprise")]
+pub async fn check_license_key_valid() -> error::Result<()> {
+    use crate::LICENSE_KEY_VALID;
+
+    let valid = *LICENSE_KEY_VALID.read().await;
+    if !valid {
+        return Err(error::Error::BadRequest(format!(
+            "License key is not valid. Go to your superadmin settings to update your license key.",
+        )));
+    }
+    Ok(())
+}
+
 pub async fn run_flow_by_path(
     authed: ApiAuthed,
     Extension(db): Extension<DB>,
@@ -1644,6 +1676,8 @@ pub async fn run_flow_by_path(
     headers: HeaderMap,
     JsonOrForm(args, raw_string): JsonOrForm,
 ) -> error::Result<(StatusCode, String)> {
+    #[cfg(feature = "enterprise")]
+    check_license_key_valid().await?;
     let flow_path = flow_path.to_path();
     check_scopes(&authed, || format!("run:flow/{flow_path}"))?;
 
@@ -1697,7 +1731,11 @@ pub async fn run_job_by_path(
     headers: HeaderMap,
     JsonOrForm(args, raw_string): JsonOrForm,
 ) -> error::Result<(StatusCode, String)> {
+    #[cfg(feature = "enterprise")]
+    check_license_key_valid().await?;
+
     let script_path = script_path.to_path();
+
     check_scopes(&authed, || format!("run:script/{script_path}"))?;
 
     let (job_payload, tag) = script_path_to_payload(script_path, &db, &w_id).await?;
@@ -1774,11 +1812,11 @@ impl Drop for Guard {
 async fn run_wait_result<T>(
     authed: ApiAuthed,
     Extension(user_db): Extension<UserDB>,
-    timeout: i32,
     uuid: Uuid,
     Path((w_id, _)): Path<(String, T)>,
 ) -> error::JsonResult<serde_json::Value> {
     let mut result;
+    let timeout = SERVER_CONFIG.read().await.timeout_wait_result.clone();
     let timeout_ms = if timeout <= 0 {
         2000
     } else {
@@ -1862,10 +1900,6 @@ lazy_static::lazy_static! {
     pub static ref QUEUE_LIMIT_WAIT_RESULT: Option<i64> = std::env::var("QUEUE_LIMIT_WAIT_RESULT")
         .ok()
         .and_then(|x| x.parse().ok());
-    pub static ref TIMEOUT_WAIT_RESULT: i32 = std::env::var("TIMEOUT_WAIT_RESULT")
-        .ok()
-        .and_then(|x| x.parse().ok())
-        .unwrap_or(20);
     pub static ref WAIT_RESULT_FAST_POLL_INTERVAL_MS: u64 = std::env::var("WAIT_RESULT_FAST_POLL_INTERVAL_MS")
         .ok()
         .and_then(|x| x.parse().ok())
@@ -1889,6 +1923,9 @@ pub async fn run_wait_result_job_by_path_get(
     Path((w_id, script_path)): Path<(String, StripPath)>,
     Query(run_query): Query<RunJobQuery>,
 ) -> error::JsonResult<serde_json::Value> {
+    #[cfg(feature = "enterprise")]
+    check_license_key_valid().await?;
+
     if method == http::Method::HEAD {
         return Ok(Json(serde_json::json!("")));
     }
@@ -1936,14 +1973,7 @@ pub async fn run_wait_result_job_by_path_get(
     .await?;
     tx.commit().await?;
 
-    run_wait_result(
-        authed,
-        Extension(user_db),
-        *TIMEOUT_WAIT_RESULT,
-        uuid,
-        Path((w_id, script_path)),
-    )
-    .await
+    run_wait_result(authed, Extension(user_db), uuid, Path((w_id, script_path))).await
 }
 
 pub async fn run_wait_result_flow_by_path_get(
@@ -1956,6 +1986,9 @@ pub async fn run_wait_result_flow_by_path_get(
     headers: HeaderMap,
     Query(run_query): Query<RunJobQuery>,
 ) -> error::JsonResult<serde_json::Value> {
+    #[cfg(feature = "enterprise")]
+    check_license_key_valid().await?;
+
     if method == http::Method::HEAD {
         return Ok(Json(serde_json::json!("")));
     }
@@ -1995,6 +2028,9 @@ pub async fn run_wait_result_script_by_path(
     headers: HeaderMap,
     JsonOrForm(args, raw_string): JsonOrForm,
 ) -> error::JsonResult<serde_json::Value> {
+    #[cfg(feature = "enterprise")]
+    check_license_key_valid().await?;
+
     run_wait_result_script_by_path_internal(
         db,
         run_query,
@@ -2107,14 +2143,7 @@ async fn run_wait_result_script_by_path_internal(
     .await?;
     tx.commit().await?;
 
-    run_wait_result(
-        authed,
-        Extension(user_db),
-        *TIMEOUT_WAIT_RESULT,
-        uuid,
-        Path((w_id, script_path)),
-    )
-    .await
+    run_wait_result(authed, Extension(user_db), uuid, Path((w_id, script_path))).await
 }
 
 pub async fn run_wait_result_script_by_hash(
@@ -2127,6 +2156,9 @@ pub async fn run_wait_result_script_by_hash(
     headers: HeaderMap,
     JsonOrForm(args, raw_string): JsonOrForm,
 ) -> error::JsonResult<serde_json::Value> {
+    #[cfg(feature = "enterprise")]
+    check_license_key_valid().await?;
+
     check_queue_too_long(&db, run_query.queue_limit).await?;
 
     let hash = script_hash.0;
@@ -2179,14 +2211,7 @@ pub async fn run_wait_result_script_by_hash(
     .await?;
     tx.commit().await?;
 
-    run_wait_result(
-        authed,
-        Extension(user_db),
-        *TIMEOUT_WAIT_RESULT,
-        uuid,
-        Path((w_id, script_hash)),
-    )
-    .await
+    run_wait_result(authed, Extension(user_db), uuid, Path((w_id, script_hash))).await
 }
 
 pub async fn openai_sync_flow_by_path(
@@ -2224,6 +2249,9 @@ pub async fn run_wait_result_flow_by_path(
     headers: HeaderMap,
     JsonOrForm(args, raw_string): JsonOrForm,
 ) -> error::JsonResult<serde_json::Value> {
+    #[cfg(feature = "enterprise")]
+    check_license_key_valid().await?;
+
     run_wait_result_flow_by_path_internal(
         db, run_query, flow_path, authed, rsmq, user_db, headers, args, raw_string, w_id,
     )
@@ -2286,14 +2314,7 @@ async fn run_wait_result_flow_by_path_internal(
     .await?;
     tx.commit().await?;
 
-    run_wait_result(
-        authed,
-        Extension(user_db),
-        *TIMEOUT_WAIT_RESULT,
-        uuid,
-        Path((w_id, flow_path)),
-    )
-    .await
+    run_wait_result(authed, Extension(user_db), uuid, Path((w_id, flow_path))).await
 }
 
 async fn run_preview_job(
@@ -2306,6 +2327,9 @@ async fn run_preview_job(
     headers: HeaderMap,
     Json(preview): Json<Preview>,
 ) -> error::Result<(StatusCode, String)> {
+    #[cfg(feature = "enterprise")]
+    check_license_key_valid().await?;
+
     check_scopes(&authed, || format!("runscript"))?;
     if authed.is_operator {
         return Err(error::Error::NotAuthorized(
@@ -2357,53 +2381,137 @@ async fn run_preview_job(
     Ok((StatusCode::CREATED, uuid.to_string()))
 }
 
+#[derive(Deserialize)]
+struct BatchInfo {
+    kind: String,
+    flow_value: Option<FlowValue>,
+    path: Option<String>,
+}
+
 #[tracing::instrument(level = "trace", skip_all)]
-async fn add_noop_jobs(
+async fn add_batch_jobs(
     authed: ApiAuthed,
     Extension(db): Extension<DB>,
     Extension(rsmq): Extension<Option<rsmq_async::MultiplexedRsmq>>,
     Path((w_id, n)): Path<(String, i32)>,
-) -> error::JsonResult<Vec<String>> {
+    Json(batch_info): Json<BatchInfo>,
+) -> error::JsonResult<Vec<Uuid>> {
     require_super_admin(&db, &authed.email).await?;
-    let mut tx = PushIsolationLevel::IsolatedRoot(db.clone(), rsmq);
 
-    let mut uuids: Vec<String> = Vec::new();
-    for _ in 0..n {
-        let (uuid, ntx) = push(
-            &db,
-            tx,
-            &w_id,
-            JobPayload::Noop,
-            serde_json::Map::new(),
-            &authed.username,
-            &authed.email,
-            username_to_permissioned_as(&authed.username),
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            false,
-            None,
-            true,
-            None,
-            None,
-            None,
-        )
-        .await?;
-        tx = PushIsolationLevel::Transaction(ntx);
-        uuids.push(uuid.to_string());
-    }
-    match tx {
-        PushIsolationLevel::Transaction(tx) => {
-            tx.commit().await?;
+    let (hash, path, job_kind, language, dedicated_worker) = match batch_info.kind.as_str() {
+        "script" => {
+            let script = sqlx::query_as::<_, Script>(
+                "select * from script where path = $1 and workspace_id = $2",
+            )
+            .bind(&batch_info.path)
+            .bind(&w_id)
+            .fetch_optional(&db)
+            .await?
+            .ok_or_else(|| {
+                error::Error::BadRequest(format!("Script not found: {:?}", batch_info.path))
+            })?;
+            (
+                Some(script.hash),
+                batch_info.path,
+                JobKind::Script,
+                Some(script.language),
+                script.dedicated_worker,
+            )
         }
-        _ => (),
-    }
+        "flow" => {
+            let mut tx = PushIsolationLevel::IsolatedRoot(db.clone(), rsmq);
+
+            let mut uuids: Vec<Uuid> = Vec::new();
+            if batch_info.flow_value.is_none() {
+                return Err(error::Error::BadRequest(
+                    "Flow value is required for batch flow".to_string(),
+                ));
+            }
+            for _ in 0..n {
+                let (uuid, ntx) = push(
+                    &db,
+                    tx,
+                    &w_id,
+                    JobPayload::RawFlow {
+                        value: batch_info.flow_value.clone().unwrap(),
+                        path: None,
+                    },
+                    serde_json::Map::new(),
+                    &authed.username,
+                    &authed.email,
+                    username_to_permissioned_as(&authed.username),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    false,
+                    false,
+                    None,
+                    true,
+                    None,
+                    None,
+                    None,
+                )
+                .await?;
+                tx = PushIsolationLevel::Transaction(ntx);
+                uuids.push(uuid);
+            }
+            match tx {
+                PushIsolationLevel::Transaction(tx) => {
+                    tx.commit().await?;
+                }
+                _ => (),
+            }
+            return Ok(Json(uuids));
+        }
+        "noop" => (None, None, JobKind::Noop, None, None),
+        _ => {
+            return Err(error::Error::BadRequest(format!(
+                "Invalid batch kind: {}",
+                batch_info.kind
+            )))
+        }
+    };
+
+    let language = language.unwrap_or(ScriptLang::Deno);
+
+    let tag = if let Some(dedicated_worker) = dedicated_worker {
+        if dedicated_worker && path.is_some() {
+            format!("{}:{}", w_id, path.clone().unwrap())
+        } else {
+            format!("{}", language.as_str())
+        }
+    } else {
+        format!("{}", language.as_str())
+    };
+
+    let uuids = sqlx::query_scalar!(
+        r#"WITH uuid_table as (
+            select gen_random_uuid() as uuid from generate_series(1, $11)
+        )
+        INSERT INTO queue 
+            (id, script_hash, script_path, job_kind, language, args, tag, created_by, permissioned_as, email, scheduled_for, workspace_id)
+            (SELECT uuid, $1, $2, $3, $4, ('{ "uuid": "' || uuid || '" }')::jsonb, $5, $6, $7, $8, $9, $10 FROM uuid_table) 
+        RETURNING id"#,
+            hash.map(|h| h.0),
+            path,
+            job_kind.clone() as JobKind,
+            language as ScriptLang,
+            tag,
+            authed.username,
+            username_to_permissioned_as(&authed.username),
+            authed.email,
+            Utc::now(),
+            w_id,
+            n
+        )
+        .fetch_all(&db)
+        .await?;
 
     Ok(Json(uuids))
 }
+
 async fn run_preview_flow_job(
     authed: ApiAuthed,
     Extension(db): Extension<DB>,
@@ -2464,6 +2572,9 @@ pub async fn run_job_by_hash(
     headers: HeaderMap,
     JsonOrForm(args, raw_string): JsonOrForm,
 ) -> error::Result<(StatusCode, String)> {
+    #[cfg(feature = "enterprise")]
+    check_license_key_valid().await?;
+
     let hash = script_hash.0;
     let (
         path,
@@ -2566,7 +2677,7 @@ async fn get_job_update(
         )
         .fetch_optional(&mut *tx)
         .await?;
-        let logs = not_found_if_none(logs, "Job", id.to_string())?;
+        let logs = not_found_if_none(logs, "Job Update", id.to_string())?;
         tx.commit().await?;
         Ok(Json(JobUpdate {
             running: Some(false),
@@ -2667,6 +2778,7 @@ pub struct ListCompletedQuery {
     pub created_or_started_before: Option<chrono::DateTime<chrono::Utc>>,
     pub created_or_started_after: Option<chrono::DateTime<chrono::Utc>>,
     pub success: Option<bool>,
+    pub running: Option<bool>,
     pub parent_job: Option<String>,
     pub order_desc: Option<bool>,
     pub job_kinds: Option<String>,

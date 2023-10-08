@@ -34,6 +34,7 @@
 	import { SUPERADMIN_SETTINGS_HASH, USER_SETTINGS_HASH } from '$lib/components/sidebar/settings'
 	import { isCloudHosted } from '$lib/cloud'
 	import MultiplayerMenu from '$lib/components/sidebar/MultiplayerMenu.svelte'
+	import { syncTutorialsTodos } from '$lib/tutorialUtils'
 
 	OpenAPI.WITH_CREDENTIALS = true
 	let menuOpen = false
@@ -74,6 +75,7 @@
 	function onLoad() {
 		loadFavorites()
 		loadUsage()
+		syncTutorialsTodos()
 	}
 
 	async function loadUsage() {
@@ -302,7 +304,7 @@
 				<div class="relative w-full h-full">
 					<div
 						class={classNames(
-							'py-2 px-2 sm:px-4 md:px-8 flex justify-between items-center shadow-sm max-w-6xl mx-auto md:hidden',
+							'py-2 px-2 sm:px-4 md:px-8 flex justify-between items-center shadow-sm max-w-7xl mx-auto md:hidden',
 							devOnly ? 'hidden' : ''
 						)}
 					>

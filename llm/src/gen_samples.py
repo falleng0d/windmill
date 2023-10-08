@@ -96,8 +96,9 @@ def prepare_prompt(
     if query["lang"] in ["postgresql"]:
         prompt = (
             prompt
-            + "\nHere's the database schema, each column is in the format [name, type, required, default?]: "
+            + "\nHere's the database schema, each column is in the format [name, type, required, default?]: <dbschema>\n"
             + DB_SCHEMA
+            + "\n</dbschema>"
         )
 
     return system, prompt, template_prompt
@@ -124,7 +125,7 @@ def gen_samples(queries_path: str, answers_path: str, prompts_path: str):
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.3,
+            temperature=0,
             max_tokens=2048,
         )
 

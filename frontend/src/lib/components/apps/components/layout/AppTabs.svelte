@@ -106,7 +106,7 @@
 	<InputValue key="disable" {id} input={disableTab} bind:value={resolvedDisabledTabs[index]} />
 {/each}
 
-<div class={resolvedConfig.tabsKind == 'sidebar' ? 'flex gap-4 w-full' : 'w-full'}>
+<div class={resolvedConfig.tabsKind == 'sidebar' ? 'flex gap-4 w-full h-full' : 'w-full'}>
 	{#if !resolvedConfig.tabsKind || resolvedConfig.tabsKind == 'tabs' || (resolvedConfig.tabsKind == 'invisibleOnView' && $mode == 'dnd')}
 		<div bind:clientHeight={tabHeight}>
 			<Tabs
@@ -123,7 +123,7 @@
 						selectedStyle={css?.selectedTab?.style}
 						disabled={resolvedDisabledTabs[index]}
 					>
-						<span class="font-semibold text-primary">{res}</span>
+						<span class="font-semibold">{res}</span>
 					</Tab>
 				{/each}
 			</Tabs>

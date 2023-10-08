@@ -2,14 +2,15 @@
 	import { Badge } from '$lib/components/common'
 	import type { FlowModule } from '$lib/gen'
 	import { classNames } from '$lib/utils'
-	import { faBolt, faMagicWandSparkles } from '@fortawesome/free-solid-svg-icons'
+	import { faMagicWandSparkles } from '@fortawesome/free-solid-svg-icons'
 	import { ClipboardCopy, ExternalLink, X } from 'lucide-svelte'
 	import { createEventDispatcher, getContext } from 'svelte'
 	import { Icon } from 'svelte-awesome'
 	import InsertModuleButton from './InsertModuleButton.svelte'
 	import type { FlowCopilotContext } from '$lib/components/copilot/flow'
-	import { existsOpenaiResourcePath } from '$lib/stores'
+	import { copilotInfo } from '$lib/stores'
 	import Menu from '$lib/components/common/menu/Menu.svelte'
+	import InsertTriggerButton from './InsertTriggerButton.svelte'
 
 	export let label: string
 	export let modules: FlowModule[] | undefined
@@ -34,6 +35,7 @@
 		deleteBranch: { module: FlowModule; index: number }
 	}>()
 	let openMenu = false
+	let triggerOpenMenu = false
 	let openNoCopilot = false
 
 	const { drawerStore: copilotDrawerStore, currentStepStore: copilotCurrentStepStore } =
@@ -57,6 +59,7 @@
 	</div>
 {/if}
 <!-- svelte-ignore a11y-click-events-have-key-events -->
+<!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
 	class={classNames(
 		'w-full flex relative overflow-hidden rounded-sm',
@@ -74,6 +77,7 @@
 			}
 		}
 	}}
+	id={`flow-editor-virtual-${label}`}
 >
 	<div
 		class="flex gap-1 justify-between {center
@@ -146,7 +150,7 @@
 		<Menu pointerDown noMinW placement="bottom-center" let:close bind:show={openNoCopilot}>
 			<button
 				title="AI Flow Builder"
-				on:pointerdown={$existsOpenaiResourcePath
+				on:pointerdown={$copilotInfo.exists_openai_resource_path
 					? (ev) => {
 							ev.preventDefault()
 							ev.stopPropagation()
@@ -159,7 +163,7 @@
 			>
 				<Icon data={faMagicWandSparkles} scale={1} />
 			</button>
-			{#if !$existsOpenaiResourcePath}
+			{#if !$copilotInfo.exists_openai_resource_path}
 				<div class="text-primary p-4">
 					<p class="text-sm w-80"
 						>Enable Windmill AI in the <a
@@ -177,18 +181,24 @@
 			{/if}
 		</Menu>
 	</div>
-	<div class="w-7 absolute top-12 left-[65%] right-[35%] -translate-x-1/2">
-		<button
-			title="Add a Trigger"
-			on:click={() => {
+	<div
+		class="{triggerOpenMenu
+			? 'z-10'
+			: ''} w-7 absolute top-12 left-[65%] right-[35%] -translate-x-1/2"
+	>
+		<InsertTriggerButton
+			bind:open={triggerOpenMenu}
+			on:new={(e) => {
 				if (modules) {
-					dispatch('insert', { modules, index: 0, detail: 'trigger' })
+					dispatch('insert', {
+						modules,
+						index: 0,
+						detail: e.detail
+					})
 				}
 			}}
-			type="button"
-			class="text-primary bg-surface border mx-0.5 rotate-180 focus:outline-none hover:bg-surface-hover focus:ring-4 focus:ring-gray-200 font-medium rounded-full text-sm w-6 h-6 flex items-center justify-center"
-		>
-			<Icon data={faBolt} scale={0.8} />
-		</button>
+			index={0}
+			modules={modules ?? []}
+		/>
 	</div>
 {/if}

@@ -8,8 +8,8 @@ use crate::{
         create_args_and_out_file, get_reserved_variables, handle_child, read_result, set_logs,
         write_file,
     },
-    AuthedClientBackgroundTask, DENO_CACHE_DIR, DENO_PATH, DISABLE_NSJAIL, NPM_CONFIG_REGISTRY,
-    PATH_ENV, TZ_ENV,
+    AuthedClientBackgroundTask, DENO_CACHE_DIR, DENO_PATH, DISABLE_NSJAIL, HOME_ENV,
+    NPM_CONFIG_REGISTRY, PATH_ENV, TZ_ENV,
 };
 use tokio::{fs::File, io::AsyncReadExt, process::Command};
 use windmill_common::{error::Result, BASE_URL};
@@ -41,8 +41,12 @@ lazy_static::lazy_static! {
 
 
 }
-fn get_common_deno_proc_envs(token: &str, base_internal_url: &str) -> HashMap<String, String> {
-    let hostname_base = BASE_URL.split("://").last().unwrap_or("localhost");
+async fn get_common_deno_proc_envs(
+    token: &str,
+    base_internal_url: &str,
+) -> HashMap<String, String> {
+    let hostname = BASE_URL.read().await.clone();
+    let hostname_base = hostname.split("://").last().unwrap_or("localhost");
     let hostname_internal = base_internal_url.split("://").last().unwrap_or("localhost");
     let deno_auth_tokens_base = DENO_AUTH_TOKENS.as_str();
     let deno_auth_tokens =
@@ -50,6 +54,7 @@ fn get_common_deno_proc_envs(token: &str, base_internal_url: &str) -> HashMap<St
 
     let mut deno_envs: HashMap<String, String> = HashMap::from([
         (String::from("PATH"), PATH_ENV.clone()),
+        (String::from("HOME"), HOME_ENV.clone()),
         (String::from("TZ"), TZ_ENV.clone()),
         (String::from("DENO_AUTH_TOKENS"), deno_auth_tokens),
         (
@@ -58,7 +63,7 @@ fn get_common_deno_proc_envs(token: &str, base_internal_url: &str) -> HashMap<St
         ),
     ]);
 
-    if let Some(ref s) = *NPM_CONFIG_REGISTRY {
+    if let Some(ref s) = NPM_CONFIG_REGISTRY.read().await.clone() {
         deno_envs.insert(String::from("NPM_CONFIG_REGISTRY"), s.clone());
     }
     return deno_envs;
@@ -87,6 +92,10 @@ pub async fn generate_deno_lock(
     write_file(job_dir, "import_map.json", &import_map).await?;
     write_file(job_dir, "empty.ts", "").await?;
 
+    let mut deno_envs = HashMap::new();
+    if let Some(ref s) = NPM_CONFIG_REGISTRY.read().await.clone() {
+        deno_envs.insert(String::from("NPM_CONFIG_REGISTRY"), s.clone());
+    }
     let child = Command::new(DENO_PATH.as_str())
         .current_dir(job_dir)
         .args(vec![
@@ -98,6 +107,7 @@ pub async fn generate_deno_lock(
             &import_map_path,
             "main.ts",
         ])
+        .envs(deno_envs)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
@@ -238,7 +248,7 @@ run().catch(async (e) => {{
     let reserved_variables_args_out_f = async {
         let client = client.get_authed().await;
         let args_and_out_f = async {
-            create_args_and_out_file(&client, job, job_dir).await?;
+            create_args_and_out_file(&client, job, job_dir, db).await?;
             Ok(()) as Result<()>
         };
         let reserved_variables_f = async {
@@ -258,7 +268,7 @@ run().catch(async (e) => {{
         write_import_map_f
     )?;
 
-    let common_deno_proc_envs = get_common_deno_proc_envs(&token, base_internal_url);
+    let common_deno_proc_envs = get_common_deno_proc_envs(&token, base_internal_url).await;
 
     //do not cache local dependencies
     let reload = format!("--reload={base_internal_url}");

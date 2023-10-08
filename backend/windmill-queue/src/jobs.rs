@@ -6,7 +6,7 @@
  * LICENSE-AGPL for a copy of the license.
  */
 
-use std::{collections::HashMap, sync::atomic::AtomicBool, vec};
+use std::{collections::HashMap, vec};
 
 use anyhow::Context;
 use async_recursion::async_recursion;
@@ -70,10 +70,6 @@ lazy_static::lazy_static! {
     )
     .unwrap();
 
-    // When compiled in 'benchmark' mode, this flags is exposed via the /workers/toggle endpoint
-    // and make it possible to disable to current active workers (such that they don't pull any)
-    // jobs from the queue
-    pub static ref IDLE_WORKERS: AtomicBool = AtomicBool::new(false);
 }
 
 #[cfg(feature = "enterprise")]
@@ -219,6 +215,9 @@ pub async fn add_completed_job<R: rsmq_async::RsmqConnection + Clone + Send>(
     logs: String,
     rsmq: Option<R>,
 ) -> Result<Uuid, Error> {
+    // tracing::error!("Start");
+    // let start = tokio::time::Instant::now();
+
     let is_flow =
         queued_job.job_kind == JobKind::Flow || queued_job.job_kind == JobKind::FlowPreview;
     let duration = if is_flow {
@@ -420,6 +419,8 @@ pub async fn add_completed_job<R: rsmq_async::RsmqConnection + Clone + Send>(
     }
 
     tracing::debug!("Added completed job {}", queued_job.id);
+    // tracing::error!("{:?}", start.elapsed());
+
     Ok(queued_job.id)
 }
 
@@ -1748,11 +1749,11 @@ pub async fn push<'c, R: rsmq_async::RsmqConnection + Send + 'c>(
             tag = None;
         }
         let default = || {
-            if job_kind == JobKind::Flow || job_kind == JobKind::FlowPreview {
+            if job_kind == JobKind::Flow
+                || job_kind == JobKind::FlowPreview
+                || job_kind == JobKind::Identity
+            {
                 "flow".to_string()
-            } else if job_kind == JobKind::Identity {
-                // identity is a light script, nativets is too
-                "nativets".to_string()
             } else if job_kind == JobKind::Dependencies || job_kind == JobKind::FlowDependencies {
                 "dependency".to_string()
             } else {

@@ -3,7 +3,7 @@ import { OpenAPI } from '../../gen/core/OpenAPI'
 import { ResourceService, Script, WorkspaceService } from '../../gen'
 import type { Writable } from 'svelte/store'
 
-import { existsOpenaiResourcePath, workspaceStore, type DBSchema } from '$lib/stores'
+import { copilotInfo, workspaceStore, type DBSchema } from '$lib/stores'
 import { formatResourceTypes } from './utils'
 
 import { EDIT_CONFIG, FIX_CONFIG, GEN_CONFIG } from './prompts'
@@ -16,7 +16,7 @@ import { buildClientSchema, printSchema } from 'graphql'
 export const SUPPORTED_LANGUAGES = new Set(Object.keys(GEN_CONFIG.prompts))
 
 const openaiConfig: CompletionCreateParamsStreaming = {
-	temperature: 0.3,
+	temperature: 0,
 	max_tokens: 2048,
 	model: 'gpt-4',
 	stream: true,
@@ -39,12 +39,13 @@ workspaceStore.subscribe(async (value) => {
 	})
 	if (value) {
 		try {
-			existsOpenaiResourcePath.set(
-				await WorkspaceService.existsOpenaiResourcePath({ workspace: value })
-			)
+			copilotInfo.set(await WorkspaceService.getCopilotInfo({ workspace: value }))
 		} catch (err) {
-			existsOpenaiResourcePath.set(false)
-			console.error('Could not get if OpenAI resource exists')
+			copilotInfo.set({
+				exists_openai_resource_path: false,
+				code_completion_enabled: false
+			})
+			console.error('Could not get copilot info')
 		}
 	}
 })
@@ -100,7 +101,11 @@ function addDBSChema(scriptOptions: CopilotOptions, prompt: string) {
 		const { schema, lang } = dbSchema
 		if (lang === 'graphql') {
 			const graphqlSchema = printSchema(buildClientSchema(schema))
-			prompt = prompt + '\nHere is the GraphQL schema: ' + JSON.stringify(graphqlSchema)
+			prompt =
+				prompt +
+				'\nHere is the GraphQL schema: <schema>\n' +
+				JSON.stringify(graphqlSchema) +
+				'\n</schema>'
 		} else {
 			let smallerSchema: {
 				[schemaKey: string]: {
@@ -122,20 +127,17 @@ function addDBSChema(scriptOptions: CopilotOptions, prompt: string) {
 				}
 			}
 
-			let finalSchema:
-				| typeof smallerSchema
-				| {
-						[tableKey: string]: Array<[string, string, boolean, string?]>
-				  } = smallerSchema
-			if (lang === 'postgresql' && dbSchema.publicOnly) {
-				finalSchema = smallerSchema.public || smallerSchema
+			let finalSchema: typeof smallerSchema | (typeof smallerSchema)['schemaKey'] = smallerSchema
+			if (dbSchema.publicOnly) {
+				finalSchema = smallerSchema.public || smallerSchema.PUBLIC || smallerSchema
 			} else if (lang === 'mysql' && Object.keys(smallerSchema).length === 1) {
 				finalSchema = smallerSchema[Object.keys(smallerSchema)[0]]
 			}
 			prompt =
 				prompt +
-				"\nHere's the database schema, each column is in the format [name, type, required, default?]: " +
-				JSON.stringify(finalSchema)
+				"\nHere's the database schema, each column is in the format [name, type, required, default?]: <dbschema>\n" +
+				JSON.stringify(finalSchema) +
+				'\n</dbschema>'
 		}
 	}
 	return prompt
@@ -174,7 +176,8 @@ const PROMPTS_CONFIGS = {
 
 export async function getNonStreamingCompletion(
 	messages: CreateChatCompletionRequestMessage[],
-	abortController: AbortController
+	abortController: AbortController,
+	model: string = 'gpt-4'
 ) {
 	if (!openai) {
 		throw new Error('OpenAI not initialized')
@@ -184,12 +187,18 @@ export async function getNonStreamingCompletion(
 		{
 			...openaiConfig,
 			messages,
-			stream: false
+			stream: false,
+			model
 		},
 		{
 			signal: abortController.signal
 		}
 	)
+
+	// if (completion.usage) {
+	// 	const { prompt_tokens, completion_tokens } = completion.usage
+	// 	console.log('Cost: ', (prompt_tokens * 0.0015 + completion_tokens * 0.002) / 1000)
+	// }
 
 	return completion.choices[0]?.message.content || ''
 }
@@ -250,21 +259,21 @@ export async function copilot(
 
 			if (scriptOptions.type === 'fix') {
 				//  in fix mode, check for explanation
-				let explanationMatch = response.match(/explanation: "(.+)"/i)
+				let explanationMatch = response.match(/<explanation>([\s\S]+)<\/explanation>/)
 
 				if (explanationMatch) {
-					const explanation = explanationMatch[1]
+					const explanation = explanationMatch[1].trim()
 					generatedExplanation?.set(explanation)
 					break
 				}
 
-				explanationMatch = response.match(/explanation: "(.+)/i)
+				explanationMatch = response.match(/<explanation>([\s\S]+)/)
 
 				if (!explanationMatch) {
 					continue
 				}
 
-				const explanation = explanationMatch[1]
+				const explanation = explanationMatch[1].replace(/<\/?e?x?p?l?a?n?a?t?i?o?n?>?$/, '').trim()
 
 				generatedExplanation?.set(explanation)
 

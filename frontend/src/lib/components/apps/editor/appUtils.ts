@@ -26,6 +26,7 @@ import { get, type Writable } from 'svelte/store'
 import { deepMergeWithPriority } from '$lib/utils'
 import { sendUserToast } from '$lib/toast'
 import { getNextId } from '$lib/components/flows/idUtils'
+import { enterpriseLicense } from '$lib/stores'
 
 export function findComponentSettings(app: App, id: string | undefined) {
 	if (!id) return undefined
@@ -104,6 +105,15 @@ export function selectId(
 	}
 }
 
+
+export function connectOutput(connectingInput: Writable<ConnectingInput>, typ:  TypedComponent['type'], id: string, spath: string) {
+	if (get(connectingInput).opened) {
+		let splitted = spath?.split('.')
+		let componentId = typ == 'containercomponent' ? splitted?.[0] : id
+		let path = typ == 'containercomponent' ? splitted?.[1] : spath
+		connectingInput.set(connectInput(get(connectingInput), componentId, path, typ))
+	}
+}
 function findGridItemById(
 	root: GridItem[],
 	subGrids: Record<string, GridItem[]> | undefined,
@@ -301,6 +311,10 @@ export function insertNewGridItem(
 	const id = keepId ?? getNextGridItemId(app)
 
 	const data = builddata(id)
+	if (data.type == 'aggridcomponentee' && !get(enterpriseLicense)) {
+		sendUserToast('AgGrid Enterprise Edition require Windmill Enterprise Edition', true)
+		throw Error('AgGrid Enterprise Edition require Windmill Enterprise Edition')
+	}
 	if (!app.subgrids) {
 		app.subgrids = {}
 	}
@@ -322,6 +336,55 @@ export function insertNewGridItem(
 
 	return id
 }
+
+export function copyComponent(
+	app: App,
+	item: GridItem,
+	parentGrid: FocusedGrid | undefined,
+	subgrids: Record<string, GridItem[]>,
+	alreadyVisited: string[]
+) {
+	if (alreadyVisited.includes(item.id)) {
+		return
+	} else {
+		alreadyVisited.push(item.id)
+	}
+	const newItem = insertNewGridItem(
+		app,
+		(id) => {
+			if (item.data.type === 'tablecomponent') {
+				return {
+					...item.data,
+					id,
+					actionButtons:
+						item.data.actionButtons.map((x) => ({
+							...x,
+							id: x.id.replace(`${item.id}_`, `${id}_`)
+						})) ?? []
+				}
+			} else {
+				return { ...item.data, id }
+			}
+		},
+		parentGrid,
+		Object.fromEntries(gridColumns.map((column) => [column, item[column]]))
+	)
+
+	for (let i = 0; i < (item?.data?.numberOfSubgrids ?? 0); i++) {
+		subgrids[`${item.id}-${i}`].forEach((subgridItem) => {
+			copyComponent(
+				app,
+				subgridItem,
+				{ parentComponentId: newItem, subGridIndex: i },
+				subgrids,
+				alreadyVisited
+			)
+		})
+	}
+
+	return newItem
+}
+
 
 export function getAllSubgridsAndComponentIds(
 	app: App,
