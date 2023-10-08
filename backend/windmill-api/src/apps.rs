@@ -965,8 +965,8 @@ fn build_args(
     args: &Map<String, Value>,
 ) -> Result<Map<String, Value>> {
     // disallow var and res access in args coming from the user for security reasons
-    args.into_iter()
-        .try_for_each(|x| disallow_var_res_access(x.1))?;
+    // args.into_iter()
+    //     .try_for_each(|x| disallow_var_res_access(x.1))?;
     let key = format!("{}:{}", component, &path);
     let static_args = policy
         .triggerables
