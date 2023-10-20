@@ -64,6 +64,7 @@ https://github.com/windmill-labs/windmill/assets/122811744/0b132cd1-ee67-4505-82
     - [OAuth for self-hosting](#oauth-for-self-hosting)
     - [smtp for self-hosting](#smtp-for-self-hosting)
     - [Resource types](#resource-types)
+    - [Manually fetch latest Windmill binary](#manually-fetch-latest-windmill-binary)
   - [Environment Variables](#environment-variables)
   - [Run a local dev setup](#run-a-local-dev-setup)
     - [only Frontend](#only-frontend)
@@ -226,6 +227,19 @@ From there, you can follow the setup app and create other users.
 We publish helm charts at:
 <https://github.com/windmill-labs/windmill-helm-charts>.
 
+### Run from binaries
+
+Each release includes the corresponding binaries for x86_64. You can simply download the
+latest `windmill` binary using the following set of bash commands.
+
+```bash
+BINARY_NAME='windmill-amd64' # or windmill-ee-amd64 for the enterprise edition
+LATEST_RELEASE=$(curl -L -s -H 'Accept: application/json' https://github.com/windmill-labs/windmill/releases/latest)
+LATEST_VERSION=$(echo $LATEST_RELEASE | sed -e 's/.*"tag_name":"\([^"]*\)".*/\1/')
+ARTIFACT_URL="https://github.com/windmill-labs/windmill/releases/download/$LATEST_VERSION/$BINARY_NAME"
+wget "$ARTIFACT_URL" -O windmill
+```
+
 ### OAuth, SSO & SMTP
 
 Windmill Community Edition allows to configure the OAuth, SSO (including Google Workspace SSO, Microsoft/Azure and Okta) directly from the UI in the superadmin settings. Do note that there is a limit of 50 SSO users on the community edition.
@@ -259,12 +273,12 @@ it being synced automatically everyday.
 | --------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
 | DATABASE_URL                                  |                                            | The Postgres database url.                                                                                                                                                                         | All                   |
 | WORKER_GROUP                                  | default                                    | The worker group the worker belongs to and get its configuration pulled from                                                                                                                       | Worker                |
+| MODE                                          | standalone                                 | The mode if the binary. Possible values: standalone, worker, server                                                                                                                                | All                   |
 | SERVER_BIND_ADDR                              | 0.0.0.0                                    | IP Address on which to bind listening socket                                                                                                                                                       | Server                |
 | PORT                                          | 8000                                       | Exposed port                                                                                                                                                                                       | Server                |
-| DISABLE_SERVER                                | false                                      | Disable the external API, operate as a worker only instance                                                                                                                                        | Worker                |
 | METRICS_ADDR                                  | None                                       | (ee only) The socket addr at which to expose Prometheus metrics at the /metrics path. Set to "true" to expose it on port 8001                                                                      | All                   |
 | JSON_FMT                                      | false                                      | Output the logs in json format instead of logfmt                                                                                                                                                   | All                   |
-| BASE_URL                                      | http://localhost:8000                      | The base url that is exposed publicly to access your instance                                                                                                                                      | Server                |
+| BASE_URL                                      | http://localhost:8000                      | The base url that is exposed publicly to access your instance. Is overriden by the instance settings if any.                                                                                       | Server                |
 | TIMEOUT                                       | 60 _ 60 _ 24 \* 7 (1 week)                 | The maximum time of execution of a script. When reached, the job is failed as having timedout.                                                                                                     |
 | SCRIPT_TOKEN_EXPIRY                           | 900                                        | The default duration period of the ephemeral-token generated at the beginning of a script                                                                                                          | Worker                |
 | ZOMBIE_JOB_TIMEOUT                            | 30                                         | The timeout after which a job is considered to be zombie if the worker did not send pings about processing the job (every server check for zombie jobs every 30s)                                  | Server                |
@@ -329,7 +343,9 @@ it being synced automatically everyday.
 | SAML_METADATA                                 | None                                       | SAML Metadata URL to enable SAML SSO (EE only)                                                                                                                                                     | Server                |
 | SECRET_SALT                                   | None                                       | Secret Salt used for encryption and decryption of secrets. If defined, the secrets will not be decryptable unless the right salt is passed in, which is the case for the workers and the server    | Server + Worker       |
 | OPENAI_AZURE_BASE_PATH                        | None                                       | Azure OpenAI API base path (no trailing slash)                                                                                                                                                     | Server                |
+| DISABLE_EMBEDDING                             | false                                      | Disable local embedding search of hub scripts                                                                                                                                                      | Server                |
 | DISABLE_NSJAIL                                | true                                       | Disable Nsjail Sandboxing                                                                                                                                                                          | Worker                |
+| DISABLE_SERVER                                | false                                      | Disable the external API, operate as a worker only instance                                                                                                                                        | Worker                |
 
 ## Run a local dev setup
 

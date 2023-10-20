@@ -56,6 +56,8 @@ use windmill_queue::PushIsolationLevel;
 
 use std::{fs, str};
 
+pub const WORKSPACE_SLACK_BOT_TOKEN_PATH: &str = "f/slack_bot/bot_token";
+
 pub fn global_service() -> Router {
     Router::new()
         .route("/login/:client", get(login))
@@ -751,12 +753,11 @@ async fn connect_slack_callback(
         "slack_bot",
         "Slack bot",
         &["g/slack".to_string()],
-        serde_json::json!({"g/slack": true})
+        serde_json::json!({"g/slack": true, "g/error_handler": false})
     )
     .execute(&mut *tx)
     .await?;
 
-    let token_path = "f/slack_bot/bot_token";
     let mc = build_crypt(&mut tx, &w_id).await?;
     let value = encrypt(&mc, &token.bot.bot_access_token);
     sqlx::query!(
@@ -765,7 +766,7 @@ async fn connect_slack_callback(
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (workspace_id, path) DO UPDATE SET value = $3",
         &w_id,
-        token_path,
+        WORKSPACE_SLACK_BOT_TOKEN_PATH,
         value,
         true,
         "The slack bot token to act on behalf of the installed app of the connected workspace",
@@ -780,8 +781,8 @@ async fn connect_slack_callback(
             (workspace_id, path, value, description, resource_type)
             VALUES ($1, $2, $3, $4, $5) ON CONFLICT (workspace_id, path) DO UPDATE SET value = $3",
         w_id,
-        token_path,
-        serde_json::json!({ "token": format!("$var:{token_path}") }),
+        WORKSPACE_SLACK_BOT_TOKEN_PATH,
+        serde_json::json!({ "token": format!("$var:{WORKSPACE_SLACK_BOT_TOKEN_PATH}") }),
         "The slack bot token to act on behalf of the installed app of the connected workspace",
         "slack",
     )
@@ -902,7 +903,7 @@ async fn slack_command(
                 tx,
                 &settings.workspace_id,
                 payload,
-                map,
+                sqlx::types::Json(map),
                 &form.user_name,
                 &settings.slack_email,
                 "g/slack".to_string(),

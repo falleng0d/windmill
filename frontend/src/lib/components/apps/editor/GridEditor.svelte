@@ -72,11 +72,7 @@
 	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<div
 		style={$app.css?.['app']?.['grid']?.style}
-		class={twMerge(
-			'p-2 overflow-visible',
-			$app.css?.['app']?.['grid']?.class ?? '',
-			'wm-app-grid border'
-		)}
+		class={twMerge('p-2 overflow-visible', $app.css?.['app']?.['grid']?.class ?? '', 'wm-app-grid')}
 		on:pointerdown={() => {
 			$selectedComponent = undefined
 			$focusedGrid = undefined
@@ -85,9 +81,9 @@
 	>
 		<div
 			class={twMerge(
-				!$focusedGrid && $mode !== 'preview' ? 'border-dashed' : '',
+				!$focusedGrid && $mode !== 'preview' ? 'outline-dashed' : '',
 				'subgrid',
-				'border-[#999999] dark:border-[#aaaaaa] border '
+				'outline-[#999999] dark:outline-[#aaaaaa] outline-dotted outline-offset-2 outline-1'
 			)}
 			style={`transform: scale(${$scale / 100})`}
 		>

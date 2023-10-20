@@ -21,6 +21,7 @@ use crate::{
     variables::build_crypt,
     webhook_util::{InstanceEvent, WebhookShared}
 };
+use crate::oauth2::WORKSPACE_SLACK_BOT_TOKEN_PATH;
 #[cfg(feature = "enterprise")]
 use axum::response::Redirect;
 use axum::{
@@ -31,6 +32,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use chrono::Utc;
 use magic_crypt::MagicCryptTrait;
 #[cfg(feature = "enterprise")]
 use stripe::CustomerId;
@@ -45,9 +47,11 @@ use windmill_common::{
     utils::{paginate, rd_string, require_admin, Pagination},
     variables::ExportableListableVariable,
 };
+use windmill_queue::QueueTransaction;
 
 use hyper::{header, StatusCode};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Map};
 use sqlx::{FromRow, Postgres, Transaction};
 use tempfile::TempDir;
 use tokio::fs::File;
@@ -64,6 +68,7 @@ pub fn workspaced_service() -> Router {
         .route("/get_settings", get(get_settings))
         .route("/get_deploy_to", get(get_deploy_to))
         .route("/edit_slack_command", post(edit_slack_command))
+        .route("/run_slack_message_test_job", post(run_slack_message_test_job))
         .route("/edit_webhook", post(edit_webhook))
         .route("/edit_auto_invite", post(edit_auto_invite))
         .route("/edit_deploy_to", post(edit_deploy_to))
@@ -127,6 +132,7 @@ pub struct WorkspaceSettings {
     pub openai_resource_path: Option<String>,
     pub code_completion_enabled: bool,
     pub error_handler: Option<String>,
+    pub error_handler_extra_args: Option<serde_json::Value>,
 }
 
 #[derive(FromRow, Serialize, Debug)]
@@ -149,6 +155,17 @@ struct EditCommandScript {
     slack_command_script: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct RunSlackMessageTestJobRequest {
+    hub_script_path: String,
+    channel: String,
+    test_msg: String
+}
+
+#[derive(Serialize)]
+struct RunSlackMessageTestJobResponse {
+    job_uuid: String,
+}
 
 #[cfg(feature = "enterprise")]
 #[derive(Deserialize)]
@@ -227,6 +244,7 @@ pub struct NewWorkspaceUser {
 #[derive(Deserialize)]
 pub struct EditErrorHandler {
     pub error_handler: Option<String>,
+    pub error_handler_extra_args: Option<serde_json::Value>,
 }
 
 async fn list_pending_invites(
@@ -507,6 +525,44 @@ async fn edit_slack_command(
     Ok(format!("Edit command script {}", &w_id))
 }
 
+async fn run_slack_message_test_job(
+    authed: ApiAuthed,
+    Extension(db): Extension<DB>,
+    Extension(rsmq): Extension<Option<rsmq_async::MultiplexedRsmq>>,
+    Path(w_id): Path<String>,
+    Json(req): Json<RunSlackMessageTestJobRequest>,
+) -> JsonResult<RunSlackMessageTestJobResponse> {
+    let mut fake_result = Map::new();
+    fake_result.insert("error".to_string(), json!(req.test_msg));
+    fake_result.insert("success_result".to_string(), json!(req.test_msg));
+
+    let mut extra_args = Map::new();
+    extra_args.insert("channel".to_string(), json!(req.channel));
+    extra_args.insert("slack".to_string(), json!(format!("$res:{WORKSPACE_SLACK_BOT_TOKEN_PATH}")));
+
+    let tx: QueueTransaction<'_, _> = (rsmq.clone(), db.begin().await?).into();
+    let (uuid, tx) = windmill_queue::handle_on_failure(
+        &db, 
+        tx, 
+        "slack_message_test", 
+        "slack_message_test", 
+        false, 
+        w_id.as_str(),
+        &format!("script/{}", req.hub_script_path.as_str()), 
+        sqlx::types::Json(&fake_result),
+        0, 
+        Utc::now(), 
+        Some(json!(extra_args)),
+        authed.username.as_str(), 
+        authed.email.as_str(), 
+        username_to_permissioned_as(authed.username.as_str())
+    ).await?;
+    tx.commit().await?;
+
+    Ok(Json(RunSlackMessageTestJobResponse {
+        job_uuid: uuid.to_string(),
+    }))
+}
 
 #[cfg(feature = "enterprise")]
 async fn edit_deploy_to(
@@ -753,6 +809,14 @@ async fn edit_error_handler(
 ) -> Result<String> {
     require_admin(is_admin, &username)?;
 
+    #[cfg(not(feature = "enterprise"))]
+    if ee.error_handler.as_ref().is_some_and(|val|  val == "script/hub/2431/slack/schedule-error-handler-slack")
+    {
+        return Err(Error::BadRequest(
+            "Slack error handler is only available in enterprise version".to_string(),
+        ));
+    }
+
     let mut tx = db.begin().await?;
     
     sqlx::query_as!(
@@ -767,17 +831,17 @@ async fn edit_error_handler(
     .await?;
 
     if let Some(error_handler) = &ee.error_handler {
-
         sqlx::query!(
-            "UPDATE workspace_settings SET error_handler = $1 WHERE workspace_id = $2",
+            "UPDATE workspace_settings SET error_handler = $1, error_handler_extra_args = $2 WHERE workspace_id = $3",
             error_handler,
+            ee.error_handler_extra_args,
             &w_id
         )
         .execute(&mut *tx)
         .await?;
     } else {
         sqlx::query!(
-            "UPDATE workspace_settings SET error_handler = NULL WHERE workspace_id = $1",
+            "UPDATE workspace_settings SET error_handler = NULL, error_handler_extra_args = NULL WHERE workspace_id = $1",
             &w_id,
         )
         .execute(&mut *tx)

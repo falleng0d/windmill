@@ -45,7 +45,7 @@
 		'other',
 		'bun'
 	]
-	const nativeTags = ['nativets', 'postgresql', 'mysql', 'graphql', 'snowflake']
+	const nativeTags = ['nativets', 'postgresql', 'mysql', 'graphql', 'snowflake', 'bigquery']
 
 	let newTag: string = ''
 	$: selected = nconfig?.dedicated_worker != undefined ? 'dedicated' : 'normal'
@@ -77,7 +77,7 @@
 	}}
 >
 	<div class="flex flex-col w-full space-y-4">
-		<span>Are you sure you want to remove this worker nconfig?</span>
+		<span>Are you sure you want to remove this worker group {name}?</span>
 	</div>
 </ConfirmationModal>
 
@@ -271,6 +271,7 @@
 						deno={false}
 						useWebsockets={false}
 						fixedOverflowWidgets={false}
+						listenEmptyChanges
 						code={config?.init_bash ?? ''}
 						on:change={(e) => {
 							if (config) {
@@ -294,7 +295,6 @@
 					{#if dirty}
 						<div class="text-red-600 text-xs whitespace-nowrap">Non applied changes</div>
 					{/if}
-
 					<Button
 						variant="contained"
 						color="dark"
@@ -329,7 +329,7 @@
 				color="light"
 				size="xs"
 				on:click={() => {
-					if (!enterpriseLicense) {
+					if (!$enterpriseLicense) {
 						sendUserToast('Worker Management UI is an EE feature', true)
 					} else {
 						openDelete = true

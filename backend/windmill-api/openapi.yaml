@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 
 info:
-  version: 1.181.0
+  version: 1.186.0
   title: Windmill API
 
   contact:
@@ -1158,6 +1158,8 @@ paths:
                     type: boolean
                   error_handler:
                     type: string
+                  error_handler_extra_args:
+                    $ref: "#/components/schemas/ScriptArgs"
                 required:
                   - code_completion_enabled
 
@@ -1231,6 +1233,40 @@ paths:
             text/plain:
               schema:
                 type: string
+
+  /w/{workspace}/workspaces/run_slack_message_test_job:
+    post:
+      summary: run a job that sends a message to Slack
+      operationId: runSlackMessageTestJob
+      tags:
+        - workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        description: path to hub script to run and its corresponding args
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hub_script_path:
+                  type: string
+                channel:
+                  type: string
+                test_msg:
+                  type: string
+
+      responses:
+        "200":
+          description: status
+          content:
+            text/json:
+              schema:
+                type: object
+                properties:
+                  job_uuid:
+                    type: string
 
   /w/{workspace}/workspaces/edit_deploy_to:
     post:
@@ -1385,6 +1421,8 @@ paths:
               properties:
                 error_handler:
                   type: string
+                error_handler_extra_args:
+                  $ref: "#/components/schemas/ScriptArgs"
 
       responses:
         "200":
@@ -2056,8 +2094,7 @@ paths:
 
   /w/{workspace}/resources/get_value_interpolated/{path}:
     get:
-      summary:
-        get resource interpolated (variables and resources are fully unrolled)
+      summary: get resource interpolated (variables and resources are fully unrolled)
       operationId: getResourceValueInterpolated
       tags:
         - resource
@@ -2326,55 +2363,75 @@ paths:
                 items:
                   type: string
 
-  /scripts/hub/list:
+  /embeddings/query_resource_types:
     get:
-      summary: list all available hub scripts
-      operationId: listHubScripts
+      summary: query resource types by similarity
+      operationId: queryResourceTypes
       tags:
-        - script
+        - resource
+      parameters:
+        - name: text
+          description: query text
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          description: query limit
+          in: query
+          required: false
+          schema:
+            type: number
       responses:
         "200":
-          description: hub scripts list
+          description: resource type details
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  asks:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        id:
-                          type: number
-                        ask_id:
-                          type: number
-                        summary:
-                          type: string
-                        app:
-                          type: string
-                        approved:
-                          type: boolean
-                        kind:
-                          type: string
-                          enum: [script, failure, trigger, command, approval]
-                        votes:
-                          type: number
-                        views:
-                          type: number
-                      required:
-                        - id
-                        - ask_id
-                        - summary
-                        - app
-                        - approved
-                        - kind
-                        - views
-                        - votes
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    score:
+                      type: number
+                    schema: {}
+                  required:
+                    - name
+                    - score
+
+  /integrations/hub/list:
+    get:
+      summary: list hub integrations
+      operationId: listHubIntegrations
+      tags:
+        - integration
+      parameters:
+        - name: kind
+          description: query integrations kind
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: integrations details
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                  required:
+                    - name
 
   /flows/hub/list:
     get:
-      summary: list all available hub flows
+      summary: list all hub flows
       operationId: listHubFlows
       tags:
         - flow
@@ -2435,7 +2492,7 @@ paths:
 
   /apps/hub/list:
     get:
-      summary: list all available hub apps
+      summary: list all hub apps
       operationId: listHubApps
       tags:
         - app
@@ -2547,7 +2604,72 @@ paths:
                   - content
                   - language
 
-  /scripts/hub/query:
+  /scripts/hub/top:
+    get:
+      summary: get top hub scripts
+      operationId: getTopHubScripts
+      tags:
+        - script
+      parameters:
+        - name: limit
+          description: query limit
+          in: query
+          required: false
+          schema:
+            type: number
+        - name: app
+          description: query scripts app
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: kind
+          description: query scripts kind
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: hub scripts list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: number
+                        ask_id:
+                          type: number
+                        summary:
+                          type: string
+                        app:
+                          type: string
+                        version_id:
+                          type: number
+                        kind:
+                          type: string
+                          enum: [script, failure, trigger, approval]
+                        votes:
+                          type: number
+                        views:
+                          type: number
+                      required:
+                        - id
+                        - ask_id
+                        - summary
+                        - app
+                        - version_id
+                        - kind
+                        - views
+                        - votes
+
+  /embeddings/query_hub_scripts:
     get:
       summary: query hub scripts by similarity
       operationId: queryHubScripts
@@ -2572,6 +2694,12 @@ paths:
           required: false
           schema:
             type: number
+        - name: app
+          description: query scripts app
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: script details
@@ -2582,10 +2710,29 @@ paths:
                 items:
                   type: object
                   properties:
+                    ask_id:
+                      type: number
                     id:
+                      type: number
+                    version_id:
+                      type: number
+                    summary:
                       type: string
+                    app:
+                      type: string
+                    kind:
+                      type: string
+                      enum: [script, failure, trigger, approval]
+                    score:
+                      type: number
                   required:
+                    - ask_id
                     - id
+                    - version_id
+                    - summary
+                    - app
+                    - kind
+                    - score
 
   /w/{workspace}/scripts/list_search:
     get:
@@ -2615,7 +2762,7 @@ paths:
 
   /w/{workspace}/scripts/list:
     get:
-      summary: list all available scripts
+      summary: list all scripts
       operationId: listScripts
       tags:
         - script
@@ -2636,8 +2783,7 @@ paths:
           schema:
             type: string
         - name: first_parent_hash
-          description:
-            mask to filter scripts whom first direct parent has exact hash
+          description: mask to filter scripts whom first direct parent has exact hash
           in: query
           schema:
             type: string
@@ -2678,10 +2824,10 @@ paths:
           in: query
           schema:
             type: boolean
-        - name: kind
+        - name: kinds
           description: |
             (default regardless)
-            script kind
+            script kinds to filter, split by comma
           in: query
           schema:
             type: string
@@ -2694,7 +2840,7 @@ paths:
             type: boolean
       responses:
         "200":
-          description: All available scripts
+          description: All scripts
           content:
             application/json:
               schema:
@@ -2704,7 +2850,7 @@ paths:
 
   /w/{workspace}/scripts/list_paths:
     get:
-      summary: list all available scripts paths
+      summary: list all scripts paths
       operationId: listScriptPaths
       tags:
         - script
@@ -2803,10 +2949,36 @@ paths:
               schema:
                 type: string
 
+  /w/{workspace}/scripts/toggle_workspace_error_handler/p/{path}:
+    post:
+      summary: Toggle ON and OFF the workspace error handler for a given script
+      operationId: toggleWorkspaceErrorHandlerForScript
+      tags:
+        - script
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ScriptPath"
+      requestBody:
+        description: Workspace error handler enabled
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                muted:
+                  type: boolean
+      responses:
+        "200":
+          description: error handler toggled
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /workers/custom_tags:
     get:
-      summary:
-        get all instance custom tags (tags are used to dispatch jobs to
+      summary: get all instance custom tags (tags are used to dispatch jobs to
         different worker groups)
       operationId: getCustomTags
       tags:
@@ -2857,8 +3029,7 @@ paths:
 
   /w/{workspace}/scripts/delete/h/{hash}:
     post:
-      summary:
-        delete script by hash (erase content but keep hash, require admin)
+      summary: delete script by hash (erase content but keep hash, require admin)
       operationId: deleteScriptByHash
       tags:
         - script
@@ -3050,16 +3221,14 @@ paths:
             type: string
             format: date-time
         - name: scheduled_in_secs
-          description:
-            schedule the script to execute in the number of seconds starting now
+          description: schedule the script to execute in the number of seconds starting now
           in: query
           schema:
             type: integer
         - $ref: "#/components/parameters/ParentJob"
         - $ref: "#/components/parameters/NewJobId"
         - name: invisible_to_owner
-          description:
-            make the run invisible to the the script owner (default false)
+          description: make the run invisible to the the script owner (default false)
           in: query
           schema:
             type: boolean
@@ -3242,7 +3411,7 @@ paths:
 
   /w/{workspace}/flows/list_paths:
     get:
-      summary: list all available flow paths
+      summary: list all flow paths
       operationId: listFlowPaths
       tags:
         - flow
@@ -3285,7 +3454,7 @@ paths:
 
   /w/{workspace}/flows/list:
     get:
-      summary: list all available flows
+      summary: list all flows
       operationId: listFlows
       tags:
         - flow
@@ -3323,7 +3492,7 @@ paths:
             type: boolean
       responses:
         "200":
-          description: All available flow
+          description: All flow
           content:
             application/json:
               schema:
@@ -3354,6 +3523,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Flow"
+
+  /w/{workspace}/flows/toggle_workspace_error_handler/{path}:
+    post:
+      summary: Toggle ON and OFF the workspace error handler for a given flow
+      operationId: toggleWorkspaceErrorHandlerForFlow
+      tags:
+        - flow
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ScriptPath"
+      requestBody:
+        description: Workspace error handler enabled
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                muted:
+                  type: boolean
+      responses:
+        "200":
+          description: error handler toggled
+          content:
+            text/plain:
+              schema:
+                type: string
 
   /w/{workspace}/flows/get/draft/{path}:
     get:
@@ -3514,7 +3710,7 @@ paths:
 
   /w/{workspace}/raw_apps/list:
     get:
-      summary: list all available raw apps
+      summary: list all raw apps
       operationId: listRawApps
       tags:
         - raw_app
@@ -3543,7 +3739,7 @@ paths:
             type: boolean
       responses:
         "200":
-          description: All available raw apps
+          description: All raw apps
           content:
             application/json:
               schema:
@@ -3613,7 +3809,7 @@ paths:
 
   /w/{workspace}/apps/list:
     get:
-      summary: list all available apps
+      summary: list all apps
       operationId: listApps
       tags:
         - app
@@ -3642,7 +3838,7 @@ paths:
             type: boolean
       responses:
         "200":
-          description: All available apps
+          description: All apps
           content:
             application/json:
               schema:
@@ -4005,8 +4201,7 @@ paths:
             type: string
             format: date-time
         - name: scheduled_in_secs
-          description:
-            schedule the script to execute in the number of seconds starting now
+          description: schedule the script to execute in the number of seconds starting now
           in: query
           schema:
             type: integer
@@ -4014,8 +4209,7 @@ paths:
         - $ref: "#/components/parameters/NewJobId"
         - $ref: "#/components/parameters/IncludeHeader"
         - name: invisible_to_owner
-          description:
-            make the run invisible to the the flow owner (default false)
+          description: make the run invisible to the the flow owner (default false)
           in: query
           schema:
             type: boolean
@@ -4053,8 +4247,7 @@ paths:
             type: string
             format: date-time
         - name: scheduled_in_secs
-          description:
-            schedule the script to execute in the number of seconds starting now
+          description: schedule the script to execute in the number of seconds starting now
           in: query
           schema:
             type: integer
@@ -4062,8 +4255,7 @@ paths:
         - $ref: "#/components/parameters/NewJobId"
         - $ref: "#/components/parameters/IncludeHeader"
         - name: invisible_to_owner
-          description:
-            make the run invisible to the the script owner (default false)
+          description: make the run invisible to the the script owner (default false)
           in: query
           schema:
             type: boolean
@@ -4094,8 +4286,7 @@ paths:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/IncludeHeader"
         - name: invisible_to_owner
-          description:
-            make the run invisible to the the script owner (default false)
+          description: make the run invisible to the the script owner (default false)
           in: query
           schema:
             type: boolean
@@ -4128,8 +4319,7 @@ paths:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/IncludeHeader"
         - name: invisible_to_owner
-          description:
-            make the run invisible to the the script owner (default false)
+          description: make the run invisible to the the script owner (default false)
           in: query
           schema:
             type: boolean
@@ -4154,7 +4344,7 @@ paths:
 
   /w/{workspace}/jobs/queue/list:
     get:
-      summary: list all available queued jobs
+      summary: list all queued jobs
       operationId: listQueue
       tags:
         - job
@@ -4178,7 +4368,7 @@ paths:
         - $ref: "#/components/parameters/Tag"
       responses:
         "200":
-          description: All available queued jobs
+          description: All queued jobs
           content:
             application/json:
               schema:
@@ -4248,7 +4438,7 @@ paths:
 
   /w/{workspace}/jobs/completed/list:
     get:
-      summary: list all available completed jobs
+      summary: list all completed jobs
       operationId: listCompletedJobs
       tags:
         - job
@@ -4280,7 +4470,7 @@ paths:
             type: boolean
       responses:
         "200":
-          description: All available completed jobs
+          description: All completed jobs
           content:
             application/json:
               schema:
@@ -4290,7 +4480,7 @@ paths:
 
   /w/{workspace}/jobs/list:
     get:
-      summary: list all available jobs
+      summary: list all jobs
       operationId: listJobs
       tags:
         - job
@@ -4344,8 +4534,7 @@ paths:
         - job
       responses:
         "200":
-          description:
-            the timestamp of the db that can be used to compute the drift
+          description: the timestamp of the db that can be used to compute the drift
           content:
             application/json:
               schema:
@@ -4578,8 +4767,7 @@ paths:
 
   /w/{workspace}/jobs/resume_urls/{id}/{resume_id}:
     get:
-      summary:
-        get resume urls given a job_id, resume_id and a nonce to resume a flow
+      summary: get resume urls given a job_id, resume_id and a nonce to resume a flow
       operationId: getResumeUrls
       tags:
         - job
@@ -5092,8 +5280,7 @@ paths:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: only_member_of
           in: query
-          description:
-            only list the groups the user is member of (default false)
+          description: only list the groups the user is member of (default false)
           schema:
             type: boolean
       responses:
@@ -5281,8 +5468,7 @@ paths:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: only_member_of
           in: query
-          description:
-            only list the folders the user is member of (default false)
+          description: only list the folders the user is member of (default false)
           schema:
             type: boolean
       responses:
@@ -6000,8 +6186,7 @@ components:
         type: integer
     PerPage:
       name: per_page
-      description:
-        number of items to return for a given page (default 30, max 100)
+      description: number of items to return for a given page (default 30, max 100)
       in: query
       schema:
         type: integer
@@ -6135,8 +6320,7 @@ components:
         type: boolean
     ArgsFilter:
       name: args
-      description:
-        filter on jobs containing those args as a json subset (@> in postgres)
+      description: filter on jobs containing those args as a json subset (@> in postgres)
       in: query
       schema:
         type: string
@@ -6148,8 +6332,7 @@ components:
         type: string
     ResultFilter:
       name: result
-      description:
-        filter on jobs containing those result as a json subset (@> in postgres)
+      description: filter on jobs containing those result as a json subset (@> in postgres)
       in: query
       schema:
         type: string
@@ -6312,6 +6495,8 @@ components:
           type: number
         dedicated_worker:
           type: boolean
+        ws_error_handler_muted:
+          type: boolean
       required:
         - hash
         - path
@@ -6388,6 +6573,8 @@ components:
         cache_ttl:
           type: number
         dedicated_worker:
+          type: boolean
+        ws_error_handler_muted:
           type: boolean
       required:
         - path
@@ -7634,6 +7821,8 @@ components:
           type: boolean
         tag:
           type: string
+        ws_error_handler_muted:
+          type: boolean
       required:
         - path
         - edited_by
@@ -7650,6 +7839,8 @@ components:
               type: string
             tag:
               type: string
+            ws_error_handler_muted:
+              type: boolean
           required:
             - path
 

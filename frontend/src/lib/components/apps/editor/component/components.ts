@@ -90,6 +90,7 @@ export type PieChartComponent = BaseComponent<'piechartcomponent'>
 export type ChartJsComponent = BaseComponent<'chartjscomponent'>
 
 export type ScatterChartComponent = BaseComponent<'scatterchartcomponent'>
+
 export type TableComponent = BaseComponent<'tablecomponent'> & {
 	actionButtons: (BaseAppComponent & ButtonComponent & GridItem)[]
 }
@@ -302,7 +303,9 @@ const labels = {
 	sendToast: 'Display a toast notification',
 	sendErrorToast: 'Display an error toast notification',
 	open: 'Open a modal or a drawer',
-	close: 'Close a modal or a drawer'
+	close: 'Close a modal or a drawer',
+	openModal: 'Open a modal (deprecated)',
+	closeModal: 'Close a modal (deprecated)'
 }
 
 const onSuccessClick = {
@@ -350,7 +353,8 @@ const onSuccessClick = {
 				tooltip: 'The id of the modal to open',
 				fieldType: 'text',
 				type: 'static',
-				value: ''
+				value: '',
+				deprecated: true
 			}
 		},
 		closeModal: {
@@ -358,7 +362,8 @@ const onSuccessClick = {
 				tooltip: 'The id of the modal to close',
 				fieldType: 'text',
 				type: 'static',
-				value: ''
+				value: '',
+				deprecated: true
 			}
 		},
 		open: {
@@ -479,7 +484,6 @@ const paginationOneOf = {
 
 const documentationBaseUrl = 'https://www.windmill.dev/docs/apps/app_configuration_settings'
 
-
 const aggridcomponentconst = {
 	name: 'AgGrid Table',
 	icon: Table2,
@@ -491,8 +495,12 @@ const aggridcomponentconst = {
 			columnDefs: {
 				type: 'static',
 				fieldType: 'array',
-				subFieldType: 'object',
-				value: [{ field: 'id' }, { field: 'name', editable: true }, { field: 'age' }]
+				subFieldType: 'ag-grid',
+				value: [
+					{ field: 'id', flex: 1 },
+					{ field: 'name', editable: true, flex: 1 },
+					{ field: 'age', flex: 1 }
+				]
 			} as StaticAppInput,
 			flex: {
 				type: 'static',
@@ -1391,6 +1399,12 @@ This is a paragraph.
 		},
 		initialData: {
 			configuration: {
+				columnDefs: {
+					type: 'static',
+					fieldType: 'array',
+					subFieldType: 'table-column',
+					value: [{ field: 'id' }, { field: 'name' }, { field: 'age' }]
+				} as StaticAppInput,
 				search: {
 					fieldType: 'select',
 					type: 'static',
@@ -1437,7 +1451,7 @@ This is a paragraph.
 		}
 	},
 	aggridcomponent: aggridcomponentconst,
-	aggridcomponentee: {...aggridcomponentconst, name: 'AgGrid Table EE'},
+	aggridcomponentee: { ...aggridcomponentconst, name: 'AgGrid Table EE' },
 	checkboxcomponent: {
 		name: 'Toggle',
 		icon: ToggleLeft,

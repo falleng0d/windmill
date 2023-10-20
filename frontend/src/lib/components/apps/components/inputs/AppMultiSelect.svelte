@@ -149,12 +149,12 @@
 					ulSelectedClass={`${resolvedConfig.allowOverflow ? '' : 'overflow-auto max-h-full'} `}
 					ulOptionsClass={'p-2 !bg-surface-secondary'}
 					bind:selected={value}
-					on:change={() => {
-						outputs?.result.set([...(value ?? [])])
-					}}
 					options={Array.isArray(items) ? items : []}
 					placeholder={resolvedConfig.placeholder}
 					allowUserOptions={resolvedConfig.create}
+					on:change={() => {
+						outputs?.result.set([...(value ?? [])])
+					}}
 					on:open={() => {
 						$selectedComponent = [id]
 						open = true
@@ -162,13 +162,21 @@
 					on:close={() => {
 						open = false
 					}}
+					let:option
 				>
-					<div slot="option" let:option>
-						{option}
-					</div>
+					<!-- needed because portal doesn't work for mouseup event en mobile -->
+					<div
+						class="w-full"
+						on:mouseup|stopPropagation
+						on:pointerdown|stopPropagation={(e) => {
+							let newe = new MouseEvent('mouseup')
+							e.target?.['parentElement']?.dispatchEvent(newe)
+						}}>{option}</div
+					>
 				</MultiSelect>
 				<Portal>
 					<div use:floatingContent class="z5000" hidden={!open}>
+						<!-- svelte-ignore a11y-no-static-element-interactions -->
 						<!-- svelte-ignore a11y-click-events-have-key-events -->
 						<div
 							bind:this={portalRef}

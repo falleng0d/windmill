@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
-use sqlx::{Pool, Postgres, Transaction};
+use serde_json::value::RawValue;
+use sqlx::{types::Json, Pool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
@@ -27,7 +30,7 @@ pub enum JobKind {
     Noop,
 }
 
-#[derive(Debug, sqlx::FromRow, Serialize, Clone)]
+#[derive(sqlx::FromRow, Debug, Serialize, Clone)]
 pub struct QueuedJob {
     pub workspace_id: String,
     pub id: Uuid,
@@ -43,7 +46,7 @@ pub struct QueuedJob {
     pub script_hash: Option<ScriptHash>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_path: Option<String>,
-    pub args: Option<serde_json::Value>,
+    pub args: Option<Json<HashMap<String, Box<RawValue>>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logs: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -62,9 +65,9 @@ pub struct QueuedJob {
     pub schedule_path: Option<String>,
     pub permissioned_as: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub flow_status: Option<serde_json::Value>,
+    pub flow_status: Option<Json<Box<RawValue>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub raw_flow: Option<serde_json::Value>,
+    pub raw_flow: Option<Json<Box<RawValue>>>,
     pub is_flow_step: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<ScriptLang>,
@@ -95,6 +98,14 @@ pub struct QueuedJob {
 }
 
 impl QueuedJob {
+    pub fn get_args(&self) -> HashMap<String, Box<RawValue>> {
+        if let Some(args) = self.args.as_ref() {
+            args.0.clone()
+        } else {
+            HashMap::new()
+        }
+    }
+
     pub fn script_path(&self) -> &str {
         self.script_path
             .as_ref()
@@ -112,19 +123,17 @@ impl QueuedJob {
             self.script_path()
         )
     }
-}
 
-impl QueuedJob {
     pub fn parse_raw_flow(&self) -> Option<FlowValue> {
         self.raw_flow
             .as_ref()
-            .and_then(|v| serde_json::from_value::<FlowValue>(v.clone()).ok())
+            .and_then(|v| serde_json::from_str::<FlowValue>((**v).get()).ok())
     }
 
     pub fn parse_flow_status(&self) -> Option<FlowStatus> {
         self.flow_status
             .as_ref()
-            .and_then(|v| serde_json::from_value::<FlowStatus>(v.clone()).ok())
+            .and_then(|v| serde_json::from_str::<FlowStatus>((**v).get()).ok())
     }
 }
 
@@ -272,7 +281,7 @@ pub async fn script_hash_to_tag_and_limits<'c>(
     Option<bool>,
 )> {
     let script = sqlx::query!(
-        "select tag, concurrent_limit, concurrency_time_window_s, cache_ttl, language as \"language: ScriptLang\", dedicated_worker  from script where hash = $1 AND workspace_id = $2",
+        "select tag, concurrent_limit, concurrency_time_window_s, cache_ttl, language as \"language: ScriptLang\", dedicated_worker from script where hash = $1 AND workspace_id = $2",
         script_hash.0,
         w_id
     )

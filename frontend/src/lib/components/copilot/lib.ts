@@ -26,6 +26,35 @@ const openaiConfig: CompletionCreateParamsStreaming = {
 let workspace: string | undefined = undefined
 let openai: OpenAI | undefined = undefined
 
+export async function testKey({
+	apiKey,
+	abortController,
+	messages
+}: {
+	apiKey?: string
+	messages: CreateChatCompletionRequestMessage[]
+	abortController: AbortController
+}) {
+	if (apiKey) {
+		const openai = new OpenAI({
+			apiKey,
+			dangerouslyAllowBrowser: true
+		})
+		await openai.chat.completions.create(
+			{
+				...openaiConfig,
+				messages,
+				stream: false
+			},
+			{
+				signal: abortController.signal
+			}
+		)
+	} else {
+		await getNonStreamingCompletion(messages, abortController)
+	}
+}
+
 workspaceStore.subscribe(async (value) => {
 	workspace = value
 	const baseURL = `${location.origin}${OpenAPI.BASE}/w/${workspace}/openai/proxy`
@@ -74,18 +103,47 @@ interface FixScriptOpions extends BaseOptions {
 
 type CopilotOptions = ScriptGenerationOptions | EditScriptOptions | FixScriptOpions
 
-export async function addResourceTypes(scriptOptions: CopilotOptions, prompt: string) {
+async function getResourceTypes(scriptOptions: CopilotOptions) {
 	if (!workspace) {
 		throw new Error('Workspace not initialized')
 	}
 
-	if (['deno', 'bun', 'nativets'].includes(scriptOptions.language)) {
-		const resourceTypes = await ResourceService.listResourceType({ workspace })
-		const resourceTypesText = formatResourceTypes(resourceTypes, 'typescript')
-		prompt = prompt.replace('{resourceTypes}', resourceTypesText)
-	} else if (scriptOptions.language === 'python3') {
-		const resourceTypes = await ResourceService.listResourceType({ workspace })
-		const resourceTypesText = formatResourceTypes(resourceTypes, 'python3')
+	const elems =
+		scriptOptions.type === 'gen' || scriptOptions.type === 'edit' ? [scriptOptions.description] : []
+
+	if (scriptOptions.type === 'edit' || scriptOptions.type === 'fix') {
+		const { code } = scriptOptions
+
+		const mainSig =
+			scriptOptions.language === 'python3'
+				? code.match(/def main\((.*?)\)/s)
+				: code.match(/function main\((.*?)\)/s)
+
+		if (mainSig) {
+			elems.push(mainSig[1])
+		}
+
+		const matches = code.matchAll(/^(?:type|class) ([a-zA-Z0-9_]+)/gm)
+
+		for (const match of matches) {
+			elems.push(match[1])
+		}
+	}
+
+	const resourceTypes = await ResourceService.queryResourceTypes({
+		text: elems.join(';')
+	})
+
+	return resourceTypes
+}
+
+export async function addResourceTypes(scriptOptions: CopilotOptions, prompt: string) {
+	if (['deno', 'bun', 'nativets', 'python3'].includes(scriptOptions.language)) {
+		const resourceTypes = await getResourceTypes(scriptOptions)
+		const resourceTypesText = formatResourceTypes(
+			resourceTypes,
+			scriptOptions.language === 'python3' ? 'python3' : 'typescript'
+		)
 		prompt = prompt.replace('{resourceTypes}', resourceTypesText)
 	}
 	return prompt

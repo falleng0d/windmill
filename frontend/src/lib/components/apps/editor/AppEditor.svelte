@@ -79,7 +79,19 @@
 
 	const history = initHistory(app)
 
-	const errorByComponent = writable<Record<string, { error: string; componentId: string }>>({})
+	const jobsById = writable<
+		Record<
+			string,
+			{
+				job: string
+				component: string
+				result?: string
+				transformer?: { result?: string; error?: string }
+				started_at?: number
+				duration_ms?: number
+			}
+		>
+	>({})
 	const focusedGrid = writable<FocusedGrid | undefined>(undefined)
 	const pickVariableCallback: Writable<((path: string) => void) | undefined> = writable(undefined)
 	let context = {
@@ -116,7 +128,8 @@
 		jobs: writable([]),
 		staticExporter: writable({}),
 		noBackend: false,
-		errorByComponent,
+		errorByComponent: writable({}),
+		jobsById,
 		openDebugRun: writable(undefined),
 		focusedGrid,
 		stateId: writable(0),
@@ -396,6 +409,12 @@
 			existingElement.innerHTML = theme
 		}
 	}
+
+	let appEditorHeader: AppEditorHeader | undefined = undefined
+
+	export function triggerTutorial() {
+		appEditorHeader?.toggleTutorial()
+	}
 </script>
 
 <DarkModeObserver on:change={onThemeChange} />
@@ -404,7 +423,7 @@
 
 {#if !$userStore?.operator}
 	{#if $appStore}
-		<AppEditorHeader on:restore {versions} {policy} {fromHub} />
+		<AppEditorHeader on:restore {versions} {policy} {fromHub} bind:this={appEditorHeader} />
 
 		{#if $mode === 'preview'}
 			<SplitPanesWrapper>
@@ -433,7 +452,12 @@
 			<SplitPanesWrapper>
 				<Splitpanes class="max-w-full overflow-hidden">
 					<Pane bind:size={leftPanelSize} minSize={5} maxSize={33}>
-						<div class="w-full h-full relative">
+						<div
+							class={twMerge(
+								'w-full h-full relative',
+								$secondaryMenuLeftStore.isOpen ? 'overflow-hidden' : ''
+							)}
+						>
 							<SecondaryMenu right={false} />
 							<ContextPanel />
 						</div>
@@ -525,6 +549,7 @@
 												selectedTab = 'insert'
 											}
 										}}
+										id="app-editor-component-library-tab"
 									>
 										<div class="m-1 center-center">
 											<Plus size={18} />

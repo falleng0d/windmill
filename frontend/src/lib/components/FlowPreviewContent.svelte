@@ -143,10 +143,10 @@
 							}))
 					} catch {}
 				}}
-				size="md"
+				size="sm"
 				btnClasses="w-full max-w-lg"
 			>
-				<Loader2 class="animate-spin mr-2" />
+				<Loader2 size={18} class="animate-spin mr-2" />
 				Cancel
 			</Button>
 		{:else}
@@ -159,7 +159,7 @@
 				on:click={() => runPreview($previewArgs)}
 				id="flow-editor-test-flow-drawer"
 			>
-				Test flow &nbsp;<Kbd small>{getModifierKey()}</Kbd>
+				Test flow &nbsp;<Kbd small isModifier>{getModifierKey()}</Kbd>
 				<Kbd small><span class="text-lg font-bold">⏎</span></Kbd>
 			</Button>
 		{/if}
@@ -199,7 +199,13 @@
 		</div>
 		<div class="pt-4 grow">
 			{#if jobId}
-				<FlowStatusViewer bind:flowState={$flowStateStore} {jobId} bind:job />
+				<FlowStatusViewer
+					{flowStateStore}
+					{jobId}
+					on:jobsLoaded={({ detail }) => {
+						job = detail
+					}}
+				/>
 			{:else}
 				<div class="italic text-tertiary h-full grow"> Flow status will be displayed here </div>
 			{/if}

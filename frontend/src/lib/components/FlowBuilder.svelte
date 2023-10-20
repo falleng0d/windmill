@@ -13,7 +13,6 @@
 	import {
 		copilotInfo,
 		enterpriseLicense,
-		hubScripts,
 		tutorialsToDo,
 		userStore,
 		workspaceStore
@@ -39,7 +38,6 @@
 	import type { FlowEditorContext } from './flows/types'
 	import { cleanInputs, emptyFlowModuleState } from './flows/utils'
 	import { Pen } from 'lucide-svelte'
-	import { loadHubScripts } from '$lib/scripts'
 	import { createEventDispatcher } from 'svelte'
 	import Awareness from './Awareness.svelte'
 	import { getAllModules } from './flows/flowExplorer'
@@ -55,6 +53,7 @@
 	import { fade } from 'svelte/transition'
 	import { loadFlowModuleState } from './flows/flowStateUtils'
 	import FlowCopilotInputsModal from './copilot/FlowCopilotInputsModal.svelte'
+	import { snakeCase } from 'lodash'
 	import FlowBuilderTutorials from './FlowBuilderTutorials.svelte'
 
 	import FlowTutorials from './FlowTutorials.svelte'
@@ -112,7 +111,8 @@
 						value: flow.value,
 						schema: flow.schema,
 						tag: flow.tag,
-						draft_only: true
+						draft_only: true,
+						ws_error_handler_muted: flow.ws_error_handler_muted
 					}
 				})
 			}
@@ -158,7 +158,8 @@
 						summary: flow.summary,
 						description: flow.description ?? '',
 						value: flow.value,
-						schema: flow.schema
+						schema: flow.schema,
+						ws_error_handler_muted: flow.ws_error_handler_muted
 					}
 				})
 				if (enabled) {
@@ -175,7 +176,8 @@
 						description: flow.description ?? '',
 						value: flow.value,
 						schema: flow.schema,
-						tag: flow.tag
+						tag: flow.tag,
+						ws_error_handler_muted: flow.ws_error_handler_muted
 					}
 				})
 				const scheduleExists = await ScheduleService.existsSchedule({
@@ -299,8 +301,6 @@
 
 	$: initialPath && $workspaceStore && loadSchedule()
 
-	loadHubScripts()
-
 	function onKeyDown(event: KeyboardEvent) {
 		let classes = event.target?.['className']
 		if (
@@ -396,25 +396,23 @@
 		try {
 			// make sure we display the results of the last request last
 			const ts = Date.now()
-			const scriptIds = await ScriptService.queryHubScripts({
-				text: `${text}`,
-				limit: 3,
-				kind: type
-			})
+			const scripts = (
+				await ScriptService.queryHubScripts({
+					text: `${text}`,
+					limit: 3,
+					kind: type
+				})
+			).map((s) => ({
+				...s,
+				path: `hub/${s.version_id}/${s.app}/${s.summary.toLowerCase().replaceAll(/\s+/g, '_')}`,
+				summary: `${s.summary} (${s.app})`
+			}))
 			if (ts < doneTs) return
 			doneTs = ts
-
-			const scripts = scriptIds
-				.map((qs) => {
-					const s = $hubScripts?.find((hs) => hs.ask_id === Number(qs.id))
-					return s
-				})
-				.filter((s) => !!s)
 
 			$copilotModulesStore[idx].hubCompletions = scripts as {
 				path: string
 				summary: string
-				approved: boolean
 				kind: string
 				app: string
 				ask_id: number
@@ -662,15 +660,16 @@
 						copilotFlowInputs = {}
 						copilotFlowRequiredInputs = []
 						Object.entries(inputs).forEach(([key, expr]) => {
+							const snakeKey = snakeCase(key)
 							if (
 								key in stepSchema.properties &&
 								expr.includes('flow_input.') &&
 								!expr.includes('flow_input.iter') &&
-								(!$flowStore.schema || !(key in $flowStore.schema.properties)) // prevent overriding flow inputs
+								(!$flowStore.schema || !(snakeKey in $flowStore.schema.properties)) // prevent overriding flow inputs
 							) {
-								copilotFlowInputs[key] = stepSchema.properties[key]
-								if (stepSchema.required.includes(key)) {
-									copilotFlowRequiredInputs.push(key)
+								copilotFlowInputs[snakeKey] = stepSchema.properties[snakeKey]
+								if (stepSchema.required.includes(snakeKey)) {
+									copilotFlowRequiredInputs.push(snakeKey)
 								}
 							}
 						})
@@ -682,7 +681,7 @@
 						Object.entries(inputs).forEach(([key, expr]) => {
 							flowModule.value.input_transforms[key] = {
 								type: 'javascript',
-								expr
+								expr: expr.replaceAll(/flow_input\.([A-Za-z0-9_]+)/g, (_, p1) => 'flow_input.' + p1)
 							}
 						})
 					} else {
@@ -706,13 +705,14 @@
 								const schemaProperty = Object.entries(schema.properties).find(
 									(x) => x[0] === key
 								)?.[1]
+								const snakeKey = snakeCase(key)
 								if (
 									schemaProperty &&
-									(!$flowStore.schema || !(key in $flowStore.schema.properties)) // prevent overriding flow inputs
+									(!$flowStore.schema || !(snakeKey in $flowStore.schema.properties)) // prevent overriding flow inputs
 								) {
-									copilotFlowInputs[key] = schemaProperty
-									if (schema.required.includes(key)) {
-										copilotFlowRequiredInputs.push(key)
+									copilotFlowInputs[snakeKey] = schemaProperty
+									if (schema.required.includes(snakeKey)) {
+										copilotFlowRequiredInputs.push(snakeKey)
 									}
 								}
 							}
@@ -723,6 +723,7 @@
 
 						// programatically set step inputs
 						for (const key of Object.keys(flowModule.value.input_transforms)) {
+							const snakeKey = snakeCase(key)
 							flowModule.value.input_transforms[key] = {
 								type: 'javascript',
 								expr:
@@ -731,8 +732,8 @@
 											? 'flow_input.iter.value'
 											: pastModule
 											? 'results.' + pastModule.id
-											: 'flow_input.' + key
-										: 'flow_input.' + key
+											: 'flow_input.' + snakeKey
+										: 'flow_input.' + snakeKey
 							}
 						}
 					}

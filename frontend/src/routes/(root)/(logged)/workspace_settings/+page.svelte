@@ -6,6 +6,7 @@
 	import { Alert, Badge, Button, Tab, Tabs } from '$lib/components/common'
 
 	import DeployToSetting from '$lib/components/DeployToSetting.svelte'
+	import ErrorOrRecoveryHandler from '$lib/components/ErrorOrRecoveryHandler.svelte'
 	import PageHeader from '$lib/components/PageHeader.svelte'
 	import ResourcePicker from '$lib/components/ResourcePicker.svelte'
 	import ScriptPicker from '$lib/components/ScriptPicker.svelte'
@@ -23,13 +24,16 @@
 		workspaceStore
 	} from '$lib/stores'
 	import { sendUserToast } from '$lib/toast'
-	import { setQueryWithoutLoad } from '$lib/utils'
+	import { setQueryWithoutLoad, emptyString } from '$lib/utils'
 	import { faSlack } from '@fortawesome/free-brands-svg-icons'
 	import { faBarsStaggered, faScroll } from '@fortawesome/free-solid-svg-icons'
 	import { Slack } from 'lucide-svelte'
 
 	import PremiumInfo from '$lib/components/settings/PremiumInfo.svelte'
 	import Toggle from '$lib/components/Toggle.svelte'
+	import TestOpenaiKey from '$lib/components/copilot/TestOpenaiKey.svelte'
+
+	const slackErrorHandler = 'hub/2431/slack/schedule-error-handler-slack'
 
 	let initialPath: string
 	let scriptPath: string
@@ -39,9 +43,11 @@
 	let customer_id: string | undefined = undefined
 	let webhook: string | undefined = undefined
 	let workspaceToDeployTo: string | undefined = undefined
-	let errorHandlerInitialPath: string
+	let errorHandlerSelected: 'custom' | 'slack' = 'slack'
+	let errorHandlerInitialScriptPath: string
 	let errorHandlerScriptPath: string
-	let errorHandlerItemKind: 'script' = 'script'
+	let errorHandlerItemKind: 'flow' | 'script' = 'script'
+	let errorHandlerExtraArgs: Record<string, any> = {}
 	let openaiResourceInitialPath: string | undefined = undefined
 	let codeCompletionEnabled: boolean = false
 	let tab =
@@ -159,7 +165,16 @@
 		webhook = settings.webhook
 		openaiResourceInitialPath = settings.openai_resource_path
 		errorHandlerScriptPath = (settings.error_handler ?? '').split('/').slice(1).join('/')
-		errorHandlerInitialPath = errorHandlerScriptPath
+		errorHandlerInitialScriptPath = errorHandlerScriptPath
+		if (emptyString($enterpriseLicense)) {
+			errorHandlerSelected = 'custom'
+		} else {
+			errorHandlerSelected =
+				emptyString(errorHandlerScriptPath) || errorHandlerScriptPath === slackErrorHandler
+					? 'slack'
+					: 'custom'
+		}
+		errorHandlerExtraArgs = settings.error_handler_extra_args ?? {}
 		codeCompletionEnabled = settings.code_completion_enabled
 	}
 
@@ -170,17 +185,22 @@
 	}
 
 	async function editErrorHandler() {
-		errorHandlerInitialPath = errorHandlerScriptPath
 		if (errorHandlerScriptPath) {
 			await WorkspaceService.editErrorHandler({
 				workspace: $workspaceStore!,
-				requestBody: { error_handler: `${errorHandlerItemKind}/${errorHandlerScriptPath}` }
+				requestBody: {
+					error_handler: `${errorHandlerItemKind}/${errorHandlerScriptPath}`,
+					error_handler_extra_args: errorHandlerExtraArgs
+				}
 			})
 			sendUserToast(`workspace error handler set to ${errorHandlerScriptPath}`)
 		} else {
 			await WorkspaceService.editErrorHandler({
 				workspace: $workspaceStore!,
-				requestBody: { error_handler: undefined }
+				requestBody: {
+					error_handler: undefined,
+					error_handler_extra_args: undefined
+				}
 			})
 			sendUserToast(`workspace error handler removed`)
 		}
@@ -206,7 +226,7 @@
 				</Tab>
 				{#if WORKSPACE_SHOW_SLACK_CMD}
 					<Tab size="xs" value="slack">
-						<div class="flex gap-2 items-center my-1"> Slack Command </div>
+						<div class="flex gap-2 items-center my-1"> Slack </div>
 					</Tab>
 				{/if}
 				{#if isCloudHosted()}
@@ -254,10 +274,10 @@
 		{:else if tab == 'slack'}
 			<div class="flex flex-col gap-4 my-8">
 				<div class="flex flex-col gap-1">
-					<div class=" text-primary text-md font-semibold"> Send commands from slack </div>
+					<div class=" text-primary text-md font-semibold"> Connect workspace to Slack </div>
 					<div class="text-tertiary text-xs">
 						Connect your windmill workspace to your slack workspace to trigger a script or a flow
-						with a '/windmill' command.
+						with a '/windmill' command or to configure Slack error handlers.
 					</div>
 				</div>
 
@@ -310,7 +330,7 @@
 						<div class="absolute top-0 right-0 bottom-0 left-0 bg-surface-disabled/50 z-40" />
 					{/if}
 					<ScriptPicker
-						kind={Script.kind.SCRIPT}
+						kinds={[Script.kind.SCRIPT]}
 						allowFlow
 						bind:itemKind
 						bind:scriptPath
@@ -422,40 +442,53 @@
 			</div>
 		{:else if tab == 'error_handler'}
 			<PageHeader title="Script to run as error handler" primary={false} />
-			<ScriptPicker
-				kind={undefined}
-				bind:itemKind={errorHandlerItemKind}
-				bind:scriptPath={errorHandlerScriptPath}
-				initialPath={errorHandlerInitialPath}
-				on:select={editErrorHandler}
-				allowRefresh
-			/>
-			<div class="flex flex-col gap-20 items-start mt-3">
-				<div class="w-2/3">
-					<div class="text-tertiary text-xs">
-						The following args will be passed to the error handler:
-						<ul class="mt-1 ml-2">
-							<li><b>path</b>: The path of the script or flow that errored.</li>
-							<li><b>email</b>: The email of the user who ran the script or flow that errored.</li>
-							<li><b>error</b>: The error details.</li>
-							<li><b>job_id</b>: The job id.</li>
-							<li><b>is_flow</b>: Whether the error comes from a flow.</li>
-							<li><b>workspace_id</b>: The workspace id of the failed script or flow.</li>
-						</ul>
-						<br />
-						The error handler will be executed by the automatically created group g/error_handler. If
-						your error handler requires variables or resources, you need to add them to the group.
-					</div>
-				</div>
-				<div class="w-1/3 flex items-start">
-					<div class="mt-2">
-						<!-- Adjusted margin class -->
-						<Button
-							href="/scripts/add?hub=hub%2F1088%2Fwindmill%2FGlobal_%2F_workspace_error_handler_template"
-							target="_blank">Use template</Button
-						>
-					</div>
-				</div>
+
+			<ErrorOrRecoveryHandler
+				isEditable={true}
+				handlersOnlyForEe={['slack']}
+				showScriptHelpText={true}
+				customInitialScriptPath={errorHandlerInitialScriptPath}
+				bind:handlerSelected={errorHandlerSelected}
+				bind:handlerPath={errorHandlerScriptPath}
+				slackHandlerScriptPath={slackErrorHandler}
+				customScriptTemplate="/scripts/add?hub=hub%2F2420%2Fwindmill%2Fworkspace_error_handler_template"
+				bind:customHandlerKind={errorHandlerItemKind}
+				bind:handlerExtraArgs={errorHandlerExtraArgs}
+			>
+				<svelte:fragment slot="custom-tab-tooltip">
+					<Tooltip>
+						<div class="flex gap-20 items-start mt-3">
+							<div class="text-sm">
+								The following args will be passed to the error handler:
+								<ul class="mt-1 ml-2">
+									<li><b>path</b>: The path of the script or flow that errored.</li>
+									<li>
+										<b>email</b>: The email of the user who ran the script or flow that errored.
+									</li>
+									<li><b>error</b>: The error details.</li>
+									<li><b>job_id</b>: The job id.</li>
+									<li><b>is_flow</b>: Whether the error comes from a flow.</li>
+									<li><b>workspace_id</b>: The workspace id of the failed script or flow.</li>
+								</ul>
+								<br />
+								The error handler will be executed by the automatically created group g/error_handler.
+								If your error handler requires variables or resources, you need to add them to the group.
+							</div>
+						</div>
+					</Tooltip>
+				</svelte:fragment>
+			</ErrorOrRecoveryHandler>
+
+			<div class="flex mt-5 justify-start">
+				<Button
+					disabled={errorHandlerSelected === 'slack' &&
+						!emptyString(errorHandlerScriptPath) &&
+						emptyString(errorHandlerExtraArgs['channel'])}
+					size="sm"
+					on:click={editErrorHandler}
+				>
+					Save
+				</Button>
 			</div>
 		{:else if tab == 'openai'}
 			<PageHeader title="Windmill AI" primary={false} />
@@ -465,7 +498,7 @@
 					features.
 				</Alert>
 			</div>
-			<div class="mt-5">
+			<div class="mt-5 flex gap-1">
 				{#key openaiResourceInitialPath}
 					<ResourcePicker
 						resourceType="openai"
@@ -475,6 +508,7 @@
 						}}
 					/>
 				{/key}
+				<TestOpenaiKey disabled={!openaiResourceInitialPath} />
 			</div>
 			<div class="mt-3">
 				<Toggle

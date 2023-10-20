@@ -27,7 +27,9 @@
 				key: 'base_url',
 				fieldType: 'text',
 				placeholder: 'https://windmill.com',
-				storage: 'setting'
+				storage: 'setting',
+				isValid: (value: string | undefined) =>
+					value ? value?.startsWith('http') && !value?.endsWith('/') : true
 			},
 			{
 				label: 'Request Size Limit In MB',
@@ -288,11 +290,15 @@
 											<Tooltip>{setting.tooltip}</Tooltip>
 										{/if}
 										{#if values}
+											{@const hasError = setting.isValid && !setting.isValid(values[setting.key])}
 											{#if setting.fieldType == 'text'}
 												<input
 													disabled={setting.ee_only != undefined && !$enterpriseLicense}
 													type="text"
 													placeholder={setting.placeholder}
+													class={hasError
+														? 'border !border-red-700 !border-opacity-30 !focus:border-red-700 !focus:border-opacity-30 !bg-red-100'
+														: ''}
 													bind:value={values[setting.key]}
 												/>
 											{:else if setting.fieldType == 'textarea'}
@@ -353,6 +359,13 @@
 													<SecondsInput bind:seconds={values[setting.key]} />
 												</div>
 											{/if}
+
+											{#if hasError}
+												<span class="text-red-500 text-xs">
+													Base url must start with http:// or https:// and must not end with a
+													trailing slash.
+												</span>
+											{/if}
 										{:else}
 											<input disabled placeholder="Loading..." />
 										{/if}
@@ -390,9 +403,12 @@
 			<TabContent value={'oauth'}>
 				<div>
 					<h4 class="pb-4">SSO</h4>
-					<Alert type="warning" title="Limited to 50 SSO users">
-						Without EE, the number of SSO users is limited to 50. SCIM/SAML is available on EE
-					</Alert>
+					{#if !$enterpriseLicense}
+						<Alert type="warning" title="Limited to 50 SSO users">
+							Without EE, the number of SSO users is limited to 50. SCIM/SAML is available on EE
+						</Alert>
+					{/if}
+
 					<div class="py-1" />
 					<Alert type="info" title="Test on a separate tab">
 						The recommended workflow is to to save your oauth setting and test them directly on the
@@ -491,6 +507,8 @@
 	on:click={async () => {
 		await saveSettings()
 		sendUserToast('Settings updated')
-	}}>Save</Button
+	}}
 >
+	Save
+</Button>
 <div class="pb-8" />

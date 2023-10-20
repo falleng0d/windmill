@@ -2,6 +2,7 @@ use std::{collections::HashMap, process::Stdio};
 
 use itertools::Itertools;
 use regex::Regex;
+use serde_json::value::RawValue;
 use sqlx::{Pool, Postgres};
 use tokio::{
     fs::{metadata, DirBuilder, File},
@@ -46,7 +47,7 @@ use crate::S3_CACHE_BUCKET;
 use crate::{
     common::{
         create_args_and_out_file, get_reserved_variables, handle_child, read_result, set_logs,
-        write_file,
+        start_child_process, write_file,
     },
     AuthedClientBackgroundTask, DISABLE_NSJAIL, DISABLE_NUSER, HTTPS_PROXY, HTTP_PROXY,
     LOCK_CACHE_DIR, NO_PROXY, NSJAIL_PATH, PATH_ENV, PIP_CACHE_DIR, PIP_EXTRA_INDEX_URL, TZ_ENV,
@@ -64,6 +65,7 @@ pub async fn pip_compile(
     job_id: &Uuid,
     requirements: &str,
     logs: &mut String,
+    mem_peak: &mut i32,
     job_dir: &str,
     db: &Pool<Postgres>,
     worker_name: &str,
@@ -117,17 +119,19 @@ pub async fn pip_compile(
         args.extend(["--trusted-host", host]);
     }
 
-    let child = Command::new("pip-compile")
+    let mut child_cmd = Command::new("pip-compile");
+    child_cmd
         .current_dir(job_dir)
         .args(args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    let child_process = start_child_process(child_cmd, "pip-compile").await?;
     handle_child(
         job_id,
         db,
         logs,
-        child,
+        mem_peak,
+        child_process,
         false,
         worker_name,
         &w_id,
@@ -163,13 +167,14 @@ pub async fn handle_python_job(
     worker_name: &str,
     job: &QueuedJob,
     logs: &mut String,
+    mem_peak: &mut i32,
     db: &sqlx::Pool<sqlx::Postgres>,
     client: &AuthedClientBackgroundTask,
     inner_content: &String,
     shared_mount: &str,
     base_internal_url: &str,
     envs: HashMap<String, String>,
-) -> windmill_common::error::Result<serde_json::Value> {
+) -> windmill_common::error::Result<Box<RawValue>> {
     create_dependencies_dir(job_dir).await;
 
     let mut additional_python_paths: Vec<String> = WORKER_CONFIG
@@ -198,6 +203,7 @@ pub async fn handle_python_job(
                     &job.id,
                     &requirements,
                     logs,
+                    mem_peak,
                     job_dir,
                     db,
                     worker_name,
@@ -220,6 +226,7 @@ pub async fn handle_python_job(
             &job.id,
             &job.workspace_id,
             logs,
+            mem_peak,
             db,
             worker_name,
             job_dir,
@@ -283,7 +290,6 @@ pub async fn handle_python_job(
         })
         .collect::<Vec<String>>()
         .join("");
-    let client = client.get_authed().await;
     create_args_and_out_file(&client, job, job_dir, db).await?;
 
     let import_loader = if relative_imports {
@@ -384,6 +390,7 @@ except Exception as e:
     );
     write_file(job_dir, "wrapper.py", &wrapper_content).await?;
 
+    let client = client.get_authed().await;
     let mut reserved_variables = get_reserved_variables(job, &client.token, db).await?;
     let additional_python_paths_folders = additional_python_paths.iter().join(":");
     if !*DISABLE_NSJAIL {
@@ -429,7 +436,8 @@ mount {{
         job.id
     );
     let child = if !*DISABLE_NSJAIL {
-        Command::new(NSJAIL_PATH.as_str())
+        let mut nsjail_cmd = Command::new(NSJAIL_PATH.as_str());
+        nsjail_cmd
             .current_dir(job_dir)
             .env_clear()
             // inject PYTHONPATH here - for some reason I had to do it in nsjail conf
@@ -447,10 +455,11 @@ mount {{
                 "wrapper",
             ])
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?
+            .stderr(Stdio::piped());
+        start_child_process(nsjail_cmd, NSJAIL_PATH.as_str()).await?
     } else {
-        Command::new(PYTHON_PATH.as_str())
+        let mut python_cmd = Command::new(PYTHON_PATH.as_str());
+        python_cmd
             .current_dir(job_dir)
             .env_clear()
             .envs(envs)
@@ -460,14 +469,15 @@ mount {{
             .env("BASE_INTERNAL_URL", base_internal_url)
             .args(vec!["-u", "-m", "wrapper"])
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?
+            .stderr(Stdio::piped());
+        start_child_process(python_cmd, PYTHON_PATH.as_str()).await?
     };
 
     handle_child(
         &job.id,
         db,
         logs,
+        mem_peak,
         child,
         !*DISABLE_NSJAIL,
         worker_name,
@@ -485,6 +495,7 @@ pub async fn handle_python_reqs(
     job_id: &Uuid,
     w_id: &str,
     logs: &mut String,
+    mem_peak: &mut i32,
     db: &sqlx::Pool<sqlx::Postgres>,
     worker_name: &str,
     job_dir: &str,
@@ -569,14 +580,15 @@ pub async fn handle_python_reqs(
             let req = req.to_string();
             vars.push(("REQ", &req));
             vars.push(("TARGET", &venv_p));
-            Command::new(NSJAIL_PATH.as_str())
+            let mut nsjail_cmd = Command::new(NSJAIL_PATH.as_str());
+            nsjail_cmd
                 .current_dir(job_dir)
                 .env_clear()
                 .envs(vars)
                 .args(vec!["--config", "download.config.proto"])
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()?
+                .stderr(Stdio::piped());
+            start_child_process(nsjail_cmd, NSJAIL_PATH.as_str()).await?
         } else {
             let mut command_args = vec![
                 PYTHON_PATH.as_str(),
@@ -614,7 +626,8 @@ pub async fn handle_python_reqs(
                 envs.push(("NO_PROXY", no_proxy));
             }
 
-            Command::new(FLOCK_PATH.as_str())
+            let mut flock_cmd = Command::new(FLOCK_PATH.as_str());
+            flock_cmd
                 .env_clear()
                 .envs(envs)
                 .args([
@@ -624,14 +637,15 @@ pub async fn handle_python_reqs(
                     &command_args.join(" "),
                 ])
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()?
+                .stderr(Stdio::piped());
+            start_child_process(flock_cmd, FLOCK_PATH.as_str()).await?
         };
 
         let child = handle_child(
             &job_id,
             db,
             logs,
+            mem_peak,
             child,
             false,
             worker_name,

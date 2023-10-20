@@ -3,6 +3,7 @@ import { derived, type Readable, writable } from 'svelte/store'
 import type { UserWorkspaceList } from '$lib/gen/models/UserWorkspaceList.js'
 import type { TokenResponse } from './gen'
 import type { IntrospectionQuery } from 'graphql'
+import { resourceTypesStore } from './components/resourceTypesStore'
 
 export interface UserExt {
 	email: string
@@ -57,17 +58,6 @@ export const userWorkspaces: Readable<
 		return originalWorkspaces
 	}
 })
-export const hubScripts = writable<
-	| Array<{
-			path: string
-			summary: string
-			approved: boolean
-			kind: string
-			app: string
-			ask_id: number
-	  }>
-	| undefined
->(undefined)
 export const copilotInfo = writable<{
 	exists_openai_resource_path: boolean
 	code_completion_enabled: boolean
@@ -108,6 +98,7 @@ export const dbSchemas = writable<DBSchemas>({})
 export function switchWorkspace(workspace: string | undefined) {
 	localStorage.removeItem('flow')
 	localStorage.removeItem('app')
+	resourceTypesStore.set(undefined)
 	workspaceStore.set(workspace)
 }
 
@@ -115,6 +106,7 @@ export function clearStores(): void {
 	localStorage.removeItem('flow')
 	localStorage.removeItem('app')
 	localStorage.removeItem('workspace')
+	resourceTypesStore.set(undefined)
 	userStore.set(undefined)
 	workspaceStore.set(undefined)
 	usersWorkspaceStore.set(undefined)

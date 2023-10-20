@@ -1,3 +1,7 @@
+<script lang="ts" context="module">
+	let outTimeout: NodeJS.Timeout | undefined = undefined
+</script>
+
 <script lang="ts">
 	import { getContext } from 'svelte'
 	import { twMerge } from 'tailwind-merge'
@@ -75,8 +79,6 @@
 	let componentContainerHeight: number = 0
 
 	let inlineEditorOpened: boolean = false
-
-	let outTimeout: NodeJS.Timeout | undefined = undefined
 
 	function mouseOut() {
 		outTimeout && clearTimeout(outTimeout)
@@ -647,6 +649,7 @@
 </div>
 {#if initializing}
 	<!-- svelte-ignore a11y-mouse-events-have-key-events -->
+	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
 		on:mouseover|stopPropagation={() => {
 			if (component.id !== $hoverStore) {

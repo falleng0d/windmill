@@ -1,12 +1,12 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select path, tag, concurrent_limit, concurrency_time_window_s, cache_ttl, language as \"language: ScriptLang\", dedicated_worker  from script where hash = $1 AND workspace_id = $2",
+  "query": "select hash, tag, concurrent_limit, concurrency_time_window_s, cache_ttl, language as \"language: ScriptLang\", dedicated_worker from script where path = $1 AND workspace_id = $2 AND\n    created_at = (SELECT max(created_at) FROM script WHERE path = $1 AND workspace_id = $2 AND\n    deleted = false AND archived = false)",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "path",
-        "type_info": "Varchar"
+        "name": "hash",
+        "type_info": "Int8"
       },
       {
         "ordinal": 1,
@@ -42,7 +42,6 @@
                 "bash",
                 "postgresql",
                 "nativets",
-                "Nativets",
                 "bun",
                 "mysql",
                 "bigquery",
@@ -62,7 +61,7 @@
     ],
     "parameters": {
       "Left": [
-        "Int8",
+        "Text",
         "Text"
       ]
     },
@@ -76,5 +75,5 @@
       true
     ]
   },
-  "hash": "65835f2e5ad38f7cc6b147dadfef6f580f15bca96d9746c9359e98ca793f8f1f"
+  "hash": "251f18ccdd89255023258a33285757801cabe4e86385e2dea10b666d1c6f2b61"
 }

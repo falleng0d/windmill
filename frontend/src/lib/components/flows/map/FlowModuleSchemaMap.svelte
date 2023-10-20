@@ -25,8 +25,8 @@
 	import { tutorialsToDo } from '$lib/stores'
 
 	import FlowTutorials from '$lib/components/FlowTutorials.svelte'
-	import { tainted } from '$lib/components/tutorials/utils'
 	import { ignoredTutorials } from '$lib/components/tutorials/ignoredTutorials'
+	import { tutorialInProgress } from '$lib/tutorialUtils'
 
 	export let modules: FlowModule[] | undefined
 	export let sidebarSize: number | undefined = undefined
@@ -143,14 +143,11 @@
 		getContext<FlowCopilotContext | undefined>('FlowCopilotContext') || {}
 
 	function shouldRunTutorial(tutorialName: string, name: string, index: number) {
-		const svg = document.getElementsByClassName('driver-overlay driver-overlay-animated')
-		const isTainted = tainted($flowStore)
 		return (
 			$tutorialsToDo.includes(index) &&
 			name == tutorialName &&
-			svg.length === 0 &&
-			!isTainted &&
-			!$ignoredTutorials.includes(index)
+			!$ignoredTutorials.includes(index) &&
+			!tutorialInProgress()
 		)
 	}
 </script>
@@ -226,7 +223,7 @@
 			}}
 			on:insert={async ({ detail }) => {
 				if (shouldRunTutorial('forloop', detail.detail, 1)) {
-					flowTutorials?.runTutorialById('forloop')
+					flowTutorials?.runTutorialById('forloop', detail.index)
 				} else if (shouldRunTutorial('branchone', detail.detail, 2)) {
 					flowTutorials?.runTutorialById('branchone')
 				} else if (shouldRunTutorial('branchall', detail.detail, 3)) {
@@ -245,6 +242,11 @@
 							await insertNewModuleAtIndex(detail.modules, detail.index ?? 0, detail.detail)
 							$selectedId = detail.modules[detail.index ?? 0].id
 						}
+
+						if (['branchone', 'branchall'].includes(detail.detail)) {
+							await addBranch(detail.modules[detail.index ?? 0])
+						}
+
 						$flowStore = $flowStore
 					}
 				}

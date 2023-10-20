@@ -1,6 +1,6 @@
 [package]
 name = "windmill"
-version = "1.181.0"
+version = "1.186.0"
 authors.workspace = true
 edition.workspace = true
 
@@ -11,7 +11,6 @@ members = [
     "./windmill-worker",
     "./windmill-common",
     "./windmill-audit",
-    "./windmill-api-client",
     "./parsers/windmill-parser",
     "./parsers/windmill-parser-ts",
     "./parsers/windmill-parser-wasm",
@@ -22,7 +21,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.181.0"
+version = "1.186.0"
 authors = ["Ruben Fiszel <ruben@windmill.dev>"]
 edition = "2021"
 
@@ -45,7 +44,6 @@ tokio.workspace = true
 dotenv.workspace = true
 windmill-common = { workspace = true, features = ["tracing_init"] }
 windmill-api.workspace = true
-windmill-api-client.workspace = true
 windmill-worker.workspace = true
 futures.workspace = true
 tracing.workspace = true
@@ -72,10 +70,11 @@ reqwest.workspace = true
 windmill-queue.workspace = true
 axum.workspace = true
 serde.workspace = true
+windmill-api-client.workspace = true
+
 
 [workspace.dependencies]
 windmill-api = { path = "./windmill-api" }
-windmill-api-client = { path = "./windmill-api-client" }
 windmill-queue = { path = "./windmill-queue" }
 windmill-worker = { path = "./windmill-worker" }
 windmill-common = { path = "./windmill-common" }
@@ -88,6 +87,7 @@ windmill-parser-go = { path = "./parsers/windmill-parser-go" }
 windmill-parser-bash = { path = "./parsers/windmill-parser-bash" }
 windmill-parser-sql = { path = "./parsers/windmill-parser-sql" }
 windmill-parser-graphql = { path = "./parsers/windmill-parser-graphql" }
+windmill-api-client = { path = "./windmill-api-client" }
 
 axum = { version = "^0", features = ["headers"] }
 headers = "^0"
@@ -194,3 +194,9 @@ rust_decimal = { version = "1.31.0", features = ["db-postgres"]}
 jsonwebtoken = "8.3.0"
 pem = "3.0.1"
 nix = { version = "0.27.1", features = ["process", "signal"] }
+tinyvector = { git = "https://github.com/windmill-labs/tinyvector" }
+hf-hub = "0.3.2"
+tokenizers = "0.14.1"
+candle-core = "0.3.0"
+candle-transformers = "0.3.0"
+candle-nn = "0.3.0"

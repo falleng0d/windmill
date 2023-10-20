@@ -17,6 +17,7 @@
 	import DrawerContent from './common/drawer/DrawerContent.svelte'
 	import ToggleButtonGroup from '$lib/components/common/toggleButton-v2/ToggleButtonGroup.svelte'
 	import ToggleButton from '$lib/components/common/toggleButton-v2/ToggleButton.svelte'
+	import ErrorHandlerToggleButton from '$lib/components/details/ErrorHandlerToggleButton.svelte'
 	import {
 		Bug,
 		CheckCircle,
@@ -26,6 +27,7 @@
 		Pen,
 		Plus,
 		Rocket,
+		Settings,
 		X
 	} from 'lucide-svelte'
 	import autosize from 'svelte-autosize'
@@ -40,6 +42,7 @@
 	import Toggle from './Toggle.svelte'
 	import ScriptSchema from './ScriptSchema.svelte'
 	import Section from './Section.svelte'
+	import Label from './Label.svelte'
 
 	export let script: NewScript
 	export let initialPath: string = ''
@@ -188,7 +191,8 @@
 					dedicated_worker: script.dedicated_worker,
 					concurrent_limit: script.concurrent_limit,
 					concurrency_time_window_s: script.concurrency_time_window_s,
-					cache_ttl: script.cache_ttl
+					cache_ttl: script.cache_ttl,
+					ws_error_handler_muted: script.ws_error_handler_muted
 				}
 			})
 			history.replaceState(history.state, '', `/scripts/edit/${script.path}`)
@@ -231,7 +235,8 @@
 						envs: script.envs,
 						concurrent_limit: script.concurrent_limit,
 						concurrency_time_window_s: script.concurrency_time_window_s,
-						cache_ttl: script.cache_ttl
+						cache_ttl: script.cache_ttl,
+						ws_error_handler_muted: script.ws_error_handler_muted
 					}
 				})
 			}
@@ -314,11 +319,20 @@
 				<svelte:fragment slot="content">
 					<div class="p-4">
 						<TabContent value="metadata">
-							<div class="flex flex-col gap-8 my-1.5">
+							<div class="flex flex-col gap-8">
 								<Section label="Metadata">
+									<svelte:fragment slot="action">
+										<div class="flex flex-row items-center gap-2">
+											<ErrorHandlerToggleButton
+												kind="script"
+												scriptOrFlowPath={script.path}
+												bind:errorHandlerMuted={script.ws_error_handler_muted}
+												iconOnly={false}
+											/>
+										</div>
+									</svelte:fragment>
 									<div class="flex flex-col gap-4">
-										<div>
-											<span class="text-secondary text-sm leading-none">Summary</span>
+										<Label label="Summary">
 											<input
 												type="text"
 												autofocus
@@ -336,30 +350,28 @@
 													}
 												}}
 											/>
-										</div>
-										<div>
-											<span class="text-secondary text-sm leading-none">Description</span>
+										</Label>
+										<Label label="Path">
+											<Path
+												bind:this={path}
+												bind:error={pathError}
+												bind:path={script.path}
+												bind:dirty={dirtyPath}
+												{initialPath}
+												autofocus={false}
+												namePlaceholder="script"
+												kind="script"
+											/>
+										</Label>
+										<Label label="Description">
 											<textarea
 												use:autosize
 												bind:value={script.description}
 												placeholder="Description displayed in the details page"
 												class="text-sm"
 											/>
-										</div>
+										</Label>
 									</div>
-								</Section>
-
-								<Section label="Path">
-									<Path
-										bind:this={path}
-										bind:error={pathError}
-										bind:path={script.path}
-										bind:dirty={dirtyPath}
-										{initialPath}
-										autofocus={false}
-										namePlaceholder="script"
-										kind="script"
-									/>
 								</Section>
 
 								<Section label="Language">
@@ -465,21 +477,15 @@
 							</div>
 						</TabContent>
 						<TabContent value="runtime">
-							<div class="flex flex-col gap-8 my-1.5">
+							<div class="flex flex-col gap-8">
 								<Section label="Concurency limits">
-									<div class="flex gap-x-4 shrink">
-										<label class="block shrink min-w-0">
-											<span class="text-secondary text-sm leading-none">
-												Maximum number of runs
-											</span>
+									<div class="flex gap-4 shrink">
+										<Label label="Maximum number of runs">
 											<input type="number" bind:value={script.concurrent_limit} />
-										</label>
-										<label class="block shrink min-w-0">
-											<span class="text-secondary text-sm leading-none"
-												>Per time window (seconds)</span
-											>
+										</Label>
+										<Label label="Per time window (seconds)">
 											<input type="number" bind:value={script.concurrency_time_window_s} />
-										</label>
+										</Label>
 									</div>
 								</Section>
 								<Section label="Worker group tag">
@@ -654,7 +660,7 @@
 	</Drawer>
 
 	<div class="flex flex-col h-screen">
-		<div class="flex h-full max-h-12 items-center pl-2.5 pr-6 border-b shadow-sm">
+		<div class="flex h-full max-h-12 items-center px-4 border-b">
 			<div class="justify-between flex gap-2 lg:gap-8 w-full items-center">
 				<div class="flex flex-row gap-2">
 					<div class="center-center">
@@ -718,7 +724,10 @@
 							metadataOpen = true
 						}}
 					>
-						Settings
+						<div class="flex flex-row gap-2 items-center">
+							<Settings size={14} />
+							Settings
+						</div>
 					</Button>
 					<Button
 						loading={loadingDraft}
@@ -727,7 +736,7 @@
 						on:click={() => saveDraft()}
 					>
 						<span class="hidden sm:flex">
-							Save draft&nbsp;<Kbd small>{getModifierKey()}</Kbd>
+							Save draft&nbsp;<Kbd small isModifier>{getModifierKey()}</Kbd>
 						</span>
 						<Kbd small>S</Kbd>
 					</Button>
