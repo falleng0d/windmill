@@ -267,8 +267,8 @@ async fn get_app(
     let app_o = sqlx::query_as!(
         AppWithLastVersion,
         "SELECT app.id, app.path, app.summary, app.versions, app.policy,
-        app.extra_perms, app_version.value,
-        app_version.created_at, app_version.created_by from app, app_version
+        app.extra_perms, app_version.value, 
+        app_version.created_at, app_version.created_by from app, app_version 
         WHERE app.path = $1 AND app.workspace_id = $2 AND app_version.id = app.versions[array_upper(app.versions, 1)]",
         path.to_owned(),
         &w_id
@@ -292,14 +292,14 @@ async fn get_app_w_draft(
     let app_o = sqlx::query_as!(
         AppWithLastVersionAndDraft,
         r#"SELECT app.id, app.path, app.summary, app.versions, app.policy,
-        app.extra_perms, app_version.value,
+        app.extra_perms, app_version.value, 
         app_version.created_at, app_version.created_by,
         app.draft_only, draft.value as "draft?"
         from app
         INNER JOIN app_version ON
         app_version.id = app.versions[array_upper(app.versions, 1)]
-        LEFT JOIN draft ON
-        app.path = draft.path AND draft.workspace_id = $2 AND draft.typ = 'app'
+        LEFT JOIN draft ON 
+        app.path = draft.path AND draft.workspace_id = $2 AND draft.typ = 'app' 
         WHERE app.path = $1 AND app.workspace_id = $2"#,
         path.to_owned(),
         &w_id
@@ -322,8 +322,8 @@ async fn get_app_by_id(
     let app_o = sqlx::query_as!(
         AppWithLastVersion,
         "SELECT app.id, app.path, app.summary, app.versions, app.policy,
-        app.extra_perms, app_version.value,
-        app_version.created_at, app_version.created_by from app, app_version
+        app.extra_perms, app_version.value, 
+        app_version.created_at, app_version.created_by from app, app_version 
         WHERE app_version.id = $1 AND app.id = app_version.app_id AND app.workspace_id = $2",
         id,
         &w_id
@@ -354,8 +354,8 @@ async fn get_public_app_by_secret(
     let app_o = sqlx::query_as!(
         AppWithLastVersion,
         "SELECT app.id, app.path, app.summary, app.versions, app.policy,
-        app.extra_perms, app_version.value,
-        app_version.created_at, app_version.created_by from app, app_version
+        app.extra_perms, app_version.value, 
+        app_version.created_at, app_version.created_by from app, app_version 
         WHERE app.id = $1 AND app.workspace_id = $2 AND app_version.id = app.versions[array_upper(app.versions, 1)]",
         id,
         &w_id
