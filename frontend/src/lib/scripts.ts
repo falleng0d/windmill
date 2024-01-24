@@ -7,9 +7,9 @@ export function scriptLangToEditorLang(lang: Script.language) {
 	if (lang == 'deno') {
 		return 'typescript'
 	} else if (lang == 'bun') {
-		return 'typescript'
+		return 'javascript'
 	} else if (lang == 'nativets') {
-		return 'typescript'
+		return 'javascript'
 		// } else if (lang == 'graphql') {
 		// 	return 'typescript'
 	} else if (lang == 'postgresql') {
@@ -19,6 +19,8 @@ export function scriptLangToEditorLang(lang: Script.language) {
 	} else if (lang == 'bigquery') {
 		return 'sql'
 	} else if (lang == 'snowflake') {
+		return 'sql'
+	} else if (lang == 'mssql') {
 		return 'sql'
 	} else if (lang == 'python3') {
 		return 'python'
@@ -55,8 +57,8 @@ export async function getScriptByPath(path: string): Promise<{
 	schema: any
 	description: string
 	tag: string | undefined
-	concurrent_limit: number[] | undefined
-	concurrency_time_window_s: number[] | undefined
+	concurrent_limit: number | undefined
+	concurrency_time_window_s: number | undefined
 }> {
 	if (path.startsWith('hub/')) {
 		const { content, language, schema } = await ScriptService.getHubScriptByPath({ path })

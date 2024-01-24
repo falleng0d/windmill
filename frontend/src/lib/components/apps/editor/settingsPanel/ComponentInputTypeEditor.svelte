@@ -12,7 +12,6 @@
 	export let componentInput: AppInput
 	export let disableStatic: boolean = false
 	export let evalV2editor: EvalV2InputEditor | undefined
-	export let id: string
 
 	const { onchange, connectingInput, app } = getContext<AppViewerContext>('AppViewerContext')
 
@@ -67,7 +66,7 @@
 							label="Template"
 						/>
 					{/if}
-				{:else}
+				{:else if componentInput.noStatic !== true}
 					<ToggleButton
 						label="Static"
 						value="static"

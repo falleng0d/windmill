@@ -77,13 +77,21 @@
 				renameComponent(from, to, item.data)
 			})
 
-			$app.hiddenInlineScripts.forEach((x) => {
+			$app.hiddenInlineScripts?.forEach((x) => {
 				processRunnable(from, to, x)
 			})
 		}
 		propagateRename(id, newId)
 		if (item?.data.type == 'tablecomponent') {
 			for (let c of item.data.actionButtons) {
+				let old = c.id
+				c.id = c.id.replace(id + '_', newId + '_')
+				propagateRename(old, c.id)
+			}
+		}
+
+		if (item?.data.type === 'menucomponent') {
+			for (let c of item.data.menuItems) {
 				let old = c.id
 				c.id = c.id.replace(id + '_', newId + '_')
 				propagateRename(old, c.id)
@@ -102,6 +110,13 @@
 				renameComponent(from, to, c)
 			}
 		}
+
+		if (data.type === 'menucomponent') {
+			for (let c of data.menuItems) {
+				renameComponent(from, to, c)
+			}
+		}
+
 		let componentInput = data.componentInput
 		if (componentInput?.type == 'connected') {
 			if (componentInput.connection?.componentId === from) {
@@ -158,6 +173,7 @@
 <!-- svelte-ignore a11y-click-events-have-key-events -->
 <div class={$search == '' || inSearch ? '' : 'invisible h-0 overflow-hidden'}>
 	<!-- svelte-ignore a11y-mouse-events-have-key-events -->
+	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
 		on:mouseenter|stopPropagation={() => {
 			if (id !== $hoverStore) {
@@ -209,7 +225,7 @@
 					</div>
 				{/if}
 			</button>
-			{#if selectable && renamable && ($selectedComponent?.includes(id) || $hoverStore === id)}
+			{#if selectable && renamable && $selectedComponent?.includes(id)}
 				<div class="h-3">
 					<IdEditor
 						{id}
@@ -233,8 +249,10 @@
 		</div>
 	</div>
 	<div
-		class="border-b {open ? 'h-full' : 'h-0 overflow-hidden'} {$connectingInput.hoveredComponent ===
-			id && !$selectedComponent?.includes(id)
+		class="border-b {open
+			? 'h-full'
+			: 'h-0 overflow-hidden invisible'} {$connectingInput.hoveredComponent === id &&
+		!$selectedComponent?.includes(id)
 			? '  bg-orange-100/40'
 			: ''}"
 	>

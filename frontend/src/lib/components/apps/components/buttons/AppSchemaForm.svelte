@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte'
+	import { getContext, onDestroy } from 'svelte'
 	import { initConfig, initOutput, selectId } from '../../editor/appUtils'
 	import type { AppInput } from '../../inputType'
 	import type {
@@ -51,13 +51,28 @@
 
 		outputs.values.set(newArgs, true)
 		if (iterContext && listInputs) {
-			listInputs(id, newArgs)
+			listInputs.set(id, newArgs)
 		}
 	}
+
+	onDestroy(() => {
+		listInputs?.remove(id)
+	})
+
+	let schemaForm: LightweightSchemaForm
 
 	$componentControl[id] = {
 		setValue(nvalue: any) {
 			args = nvalue
+		},
+		invalidate(key: string, error: string) {
+			schemaForm?.invalidate(key, error)
+		},
+		validateAll() {
+			schemaForm?.validateAll()
+		},
+		validate(key: string) {
+			schemaForm?.validate(key)
 		}
 	}
 
@@ -106,6 +121,7 @@
 				schema={result}
 				bind:isValid={valid}
 				bind:args
+				bind:this={schemaForm}
 				displayType={Boolean(resolvedConfig.displayType)}
 				largeGap={Boolean(resolvedConfig.largeGap)}
 				{css}

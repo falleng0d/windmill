@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { ScriptService, FlowService, Script } from '$lib/gen'
+	import { ScriptService, FlowService, Script, AppService } from '$lib/gen'
 
 	import { workspaceStore } from '$lib/stores'
-	import { createEventDispatcher, onMount } from 'svelte'
+	import { createEventDispatcher } from 'svelte'
 
 	import Select from './apps/svelte-select/lib/index'
 
@@ -13,10 +13,8 @@
 	import { SELECT_INPUT_DEFAULT_STYLE } from '../defaults'
 	import ToggleButton from './common/toggleButton-v2/ToggleButton.svelte'
 	import ToggleButtonGroup from './common/toggleButton-v2/ToggleButtonGroup.svelte'
-	import { Code2 } from 'lucide-svelte'
+	import { Code, Code2, ExternalLink, Pen, RefreshCw } from 'lucide-svelte'
 	import type { SupportedLanguage } from '$lib/common'
-	import { faExternalLink, faRotateRight } from '@fortawesome/free-solid-svg-icons'
-	import Icon from 'svelte-awesome'
 	import FlowIcon from './home/FlowIcon.svelte'
 	import DarkModeObserver from './DarkModeObserver.svelte'
 	import { truncate } from '$lib/utils'
@@ -24,7 +22,7 @@
 	export let initialPath: string | undefined = undefined
 	export let scriptPath: string | undefined = undefined
 	export let allowFlow = false
-	export let itemKind: 'script' | 'flow' = 'script'
+	export let itemKind: 'script' | 'flow' | 'app' = 'script'
 	export let kinds: Script.kind[] = [Script.kind.SCRIPT]
 	export let disabled = false
 	export let allowRefresh = false
@@ -52,26 +50,19 @@
 				value: script.path,
 				label: `${script.path}${script.summary ? ` | ${truncate(script.summary, 20)}` : ''}`
 			}))
+		} else if (itemKind == 'app') {
+			items = (await AppService.listApps({ workspace: $workspaceStore! })).map((app) => ({
+				value: app.path,
+				label: `${app.path}${app.summary ? ` | ${truncate(app.summary, 20)}` : ''}`
+			}))
 		}
 	}
 
 	$: itemKind && $workspaceStore && loadItems()
 	let darkMode: boolean = false
-
-	function onThemeChange() {
-		if (document.documentElement.classList.contains('dark')) {
-			darkMode = true
-		} else {
-			darkMode = false
-		}
-	}
-
-	onMount(() => {
-		onThemeChange()
-	})
 </script>
 
-<DarkModeObserver on:change={onThemeChange} />
+<DarkModeObserver bind:darkMode />
 
 <Drawer bind:this={drawerViewer} size="900px">
 	<DrawerContent title="Script {scriptPath}" on:close={drawerViewer.closeDrawer}>
@@ -112,7 +103,7 @@
 			}}
 			bind:justValue={scriptPath}
 			{items}
-			placeholder="Pick a {itemKind}"
+			placeholder="Pick {itemKind === 'app' ? 'an' : 'a'} {itemKind}"
 			inputStyles={SELECT_INPUT_DEFAULT_STYLE.inputStyles}
 			containerStyles={darkMode
 				? SELECT_INPUT_DEFAULT_STYLE.containerStylesDark
@@ -122,43 +113,78 @@
 	{/if}
 
 	{#if allowRefresh}
-		<Button variant="border" color="light" wrapperClasses="self-stretch" on:click={loadItems}
-			><Icon scale={0.8} data={faRotateRight} /></Button
-		>
+		<Button
+			variant="border"
+			color="light"
+			wrapperClasses="self-stretch"
+			on:click={loadItems}
+			startIcon={{ icon: RefreshCw }}
+			iconOnly
+		/>
 	{/if}
 
 	{#if scriptPath !== undefined && scriptPath !== ''}
 		{#if itemKind == 'flow'}
 			<div class="flex gap-2">
 				<Button
-					endIcon={{ icon: faExternalLink }}
+					endIcon={{ icon: ExternalLink }}
 					target="_blank"
 					color="light"
 					size="xs"
-					href="/flows/edit/{scriptPath}">edit</Button
+					variant="border"
+					href="/flows/edit/{scriptPath}">Edit</Button
 				>
 				<Button
 					color="light"
 					size="xs"
+					variant="border"
 					on:click={async () => {
 						drawerFlowViewer.openDrawer()
 					}}
 				>
-					view
+					View
+				</Button>
+			</div>
+		{:else if itemKind == 'app'}
+			<div class="flex gap-2">
+				<Button
+					startIcon={{ icon: Pen }}
+					target="_blank"
+					color="light"
+					size="xs"
+					href="/apps/edit/{scriptPath}"
+					variant="border"
+				>
+					Edit
+				</Button>
+				<Button
+					color="light"
+					size="xs"
+					variant="border"
+					target="_blank"
+					startIcon={{ icon: Code }}
+					href="/apps/get/{scriptPath}"
+				>
+					View
 				</Button>
 			</div>
 		{:else}
 			<div class="flex gap-2">
 				<Button
-					endIcon={{ icon: faExternalLink }}
+					startIcon={{ icon: Pen }}
 					target="_blank"
 					color="light"
 					size="xs"
-					href="/scripts/edit/{scriptPath}">edit</Button
+					href="/scripts/edit/{scriptPath}"
+					variant="border"
 				>
+					Edit
+				</Button>
 				<Button
 					color="light"
 					size="xs"
+					variant="border"
+					startIcon={{ icon: Code }}
 					on:click={async () => {
 						const { language, content } = await getScriptByPath(scriptPath ?? '')
 						code = content
@@ -166,7 +192,7 @@
 						drawerViewer.openDrawer()
 					}}
 				>
-					view
+					View
 				</Button>
 			</div>
 		{/if}

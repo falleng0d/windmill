@@ -1,16 +1,16 @@
 <script lang="ts">
 	import { Menu } from '$lib/components/common'
-	import { faBolt } from '@fortawesome/free-solid-svg-icons'
 	import { createEventDispatcher } from 'svelte'
-	import Icon from 'svelte-awesome'
 	import StepGen from '$lib/components/copilot/StepGen.svelte'
 	import type { FlowModule } from '$lib/gen'
+	import { Zap } from 'lucide-svelte'
 
 	const dispatch = createEventDispatcher()
 	export let open: boolean | undefined = undefined
 	export let index: number
 	export let funcDesc = ''
 	export let modules: FlowModule[]
+	export let disableAi = false
 
 	$: !open && (funcDesc = '')
 </script>
@@ -27,15 +27,17 @@
 		title="Add a Trigger"
 		slot="trigger"
 		type="button"
-		class="text-primary bg-surface border mx-0.5 rotate-180 focus:outline-none hover:bg-surface-hover focus:ring-4 focus:ring-gray-200 font-medium rounded-full text-sm w-6 h-6 flex items-center justify-center"
+		class="text-primary bg-surface border-[1px] mx-[1px] border-gray-300 dark:border-gray-500 rotate-180 focus:outline-none hover:bg-surface-hover focus:ring-4 focus:ring-gray-200 font-medium rounded-full text-sm w-[25px] h-[25px] flex items-center justify-center"
 	>
-		<Icon data={faBolt} scale={0.8} />
+		<Zap size={14} />
 	</button>
-	<StepGen {index} bind:funcDesc bind:open {close} {modules} trigger />
+	{#if !disableAi}
+		<StepGen {index} bind:funcDesc bind:open {close} {modules} trigger />
+	{/if}
 	{#if funcDesc.length === 0}
-		<div class="font-mono divide-y text-xs w-full text-secondary">
+		<div class="font-mono divide-y text-xs w-full text-secondary whitespace-nowrap">
 			<button
-				class="w-full text-left py-2 px-3 hover:bg-surface-hover"
+				class="w-full text-left py-2 px-3 hover:bg-surface-hover flex flex-row items-center gap-2"
 				on:pointerdown={() => {
 					close()
 					dispatch('new', 'trigger')
@@ -43,8 +45,7 @@
 				role="menuitem"
 				tabindex="-1"
 			>
-				<Icon data={faBolt} scale={0.8} class="mr-2" />
-				Trigger
+				<Zap size={14} />Trigger
 			</button>
 		</div>
 	{/if}

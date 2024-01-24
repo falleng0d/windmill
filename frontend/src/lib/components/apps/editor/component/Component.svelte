@@ -29,6 +29,7 @@
 		AppFormButton,
 		VegaLiteHtml,
 		PlotlyHtml,
+		PlotlyHtmlV2,
 		AppRangeInput,
 		AppTabs,
 		AppIcon,
@@ -54,12 +55,20 @@
 	import AppLogsComponent from '../../components/display/AppLogsComponent.svelte'
 	import AppFlowStatusComponent from '../../components/display/AppFlowStatusComponent.svelte'
 	import AppChartJs from '../../components/display/AppChartJs.svelte'
+	import AppChartJsV2 from '../../components/display/AppChartJsV2.svelte'
 	import AppQuillEditor from '../../components/inputs/AppQuillEditor.svelte'
 	import AppList from '../../components/layout/AppList.svelte'
 	import AppJobIdLogComponent from '../../components/display/AppJobIdLogComponent.svelte'
 	import AppJobIdFlowStatus from '../../components/display/AppJobIdFlowStatus.svelte'
 	import AppCarouselList from '../../components/display/AppCarouselList.svelte'
 	import AppAggridTableEe from '../../components/display/table/AppAggridTableEe.svelte'
+	import AppCustomComponent from '../../components/display/AppCustomComponent.svelte'
+	import AppStatCard from '../../components/display/AppStatCard.svelte'
+	import AppMenu from '../../components/display/AppMenu.svelte'
+	import AppDecisionTree from '../../components/layout/AppDecisionTree.svelte'
+	import AppAgCharts from '../../components/display/charts/AppAgCharts.svelte'
+	import AppDbExplorer from '../../components/display/dbtable/AppDbExplorer.svelte'
+	import AppS3FileInput from '../../components/inputs/AppS3FileInput.svelte'
 
 	export let component: AppComponent
 	export let selected: boolean
@@ -229,6 +238,13 @@
 				componentInput={component.componentInput}
 				{render}
 			/>
+		{:else if component.type === 'customcomponent'}
+			<AppCustomComponent
+				customComponent={component.customComponent}
+				id={component.id}
+				componentInput={component.componentInput}
+				{render}
+			/>
 		{:else if component.type === 'mardowncomponent'}
 			<AppMarkdown
 				id={component.id}
@@ -254,6 +270,16 @@
 				componentInput={component.componentInput}
 				{render}
 			/>
+		{:else if component.type === 'plotlycomponentv2'}
+			<PlotlyHtmlV2
+				id={component.id}
+				configuration={component.configuration}
+				bind:initializing
+				componentInput={component.componentInput}
+				datasets={component.datasets}
+				xData={component.xData}
+				{render}
+			/>
 		{:else if component.type === 'scatterchartcomponent'}
 			<AppScatterChart
 				configuration={component.configuration}
@@ -272,6 +298,30 @@
 				componentInput={component.componentInput}
 				{render}
 			/>
+		{:else if component.type === 'agchartscomponent'}
+			<AppAgCharts
+				configuration={component.configuration}
+				id={component.id}
+				customCss={component.customCss}
+				bind:initializing
+				componentInput={component.componentInput}
+				datasets={component.datasets}
+				xData={component.xData}
+				{render}
+			/>
+		{:else if component.type === 'agchartscomponentee'}
+			<AppAgCharts
+				configuration={component.configuration}
+				id={component.id}
+				customCss={component.customCss}
+				bind:initializing
+				componentInput={component.componentInput}
+				datasets={component.datasets}
+				xData={component.xData}
+				license={component.license}
+				ee={true}
+				{render}
+			/>
 		{:else if component.type === 'tablecomponent'}
 			<AppTable
 				configuration={component.configuration}
@@ -282,12 +332,21 @@
 				actionButtons={component.actionButtons}
 				{render}
 			/>
+		{:else if component.type === 'dbexplorercomponent'}
+			<AppDbExplorer
+				configuration={component.configuration}
+				id={component.id}
+				customCss={component.customCss}
+				bind:initializing
+				{render}
+			/>
 		{:else if component.type === 'aggridcomponent'}
 			<AppAggridTable
 				id={component.id}
 				configuration={component.configuration}
 				bind:initializing
 				componentInput={component.componentInput}
+				customCss={component.customCss}
 				{render}
 			/>
 		{:else if component.type === 'aggridcomponentee'}
@@ -297,6 +356,7 @@
 				configuration={component.configuration}
 				bind:initializing
 				componentInput={component.componentInput}
+				customCss={component.customCss}
 				{render}
 			/>
 		{:else if component.type === 'textcomponent'}
@@ -559,6 +619,13 @@
 				customCss={component.customCss}
 				{render}
 			/>
+		{:else if component.type === 's3fileinputcomponent'}
+			<AppS3FileInput
+				configuration={component.configuration}
+				id={component.id}
+				customCss={component.customCss}
+				{render}
+			/>
 		{:else if component.type === 'imagecomponent'}
 			<AppImage
 				configuration={component.configuration}
@@ -634,6 +701,17 @@
 				componentInput={component.componentInput}
 				{render}
 			/>
+		{:else if component.type === 'chartjscomponentv2'}
+			<AppChartJsV2
+				configuration={component.configuration}
+				id={component.id}
+				customCss={component.customCss}
+				bind:initializing
+				componentInput={component.componentInput}
+				datasets={component.datasets}
+				xData={component.xData}
+				{render}
+			/>
 		{:else if component.type === 'carousellistcomponent'}
 			<AppCarouselList
 				id={component.id}
@@ -643,6 +721,31 @@
 				{componentContainerHeight}
 				{render}
 				bind:initializing
+			/>
+		{:else if component.type === 'statcomponent'}
+			<AppStatCard
+				id={component.id}
+				configuration={component.configuration}
+				customCss={component.customCss}
+				{render}
+			/>
+		{:else if component.type === 'menucomponent'}
+			<AppMenu
+				id={component.id}
+				verticalAlignment={component.verticalAlignment}
+				horizontalAlignment={component.horizontalAlignment}
+				configuration={component.configuration}
+				customCss={component.customCss}
+				menuItems={component.menuItems}
+				{render}
+			/>
+		{:else if component.type === 'decisiontreecomponent' && component.nodes}
+			<AppDecisionTree
+				id={component.id}
+				nodes={component.nodes}
+				customCss={component.customCss}
+				{componentContainerHeight}
+				{render}
 			/>
 		{/if}
 	</div>

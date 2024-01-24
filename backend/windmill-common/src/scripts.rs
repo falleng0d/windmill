@@ -11,6 +11,11 @@ use std::{
     hash::{Hash, Hasher},
 };
 
+use crate::{
+    error::{to_anyhow, Error},
+    utils::http_get_from_hub,
+    DB,
+};
 use serde::de::Error as _;
 use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serialize};
 use serde_json::to_string_pretty;
@@ -37,6 +42,7 @@ pub enum ScriptLang {
     Bigquery,
     Snowflake,
     Graphql,
+    Mssql,
 }
 
 impl ScriptLang {
@@ -53,6 +59,7 @@ impl ScriptLang {
             ScriptLang::Mysql => "mysql",
             ScriptLang::Bigquery => "bigquery",
             ScriptLang::Snowflake => "snowflake",
+            ScriptLang::Mssql => "mssql",
             ScriptLang::Graphql => "graphql",
         }
     }
@@ -161,8 +168,22 @@ pub struct Script {
     pub concurrent_limit: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub concurrency_time_window_s: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dedicated_worker: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ws_error_handler_muted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_ttl: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delete_after_use: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart_unless_cancelled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency_key: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -183,6 +204,18 @@ pub struct ListableScript {
     pub draft_only: Option<bool>,
     pub has_deploy_errors: bool,
     pub ws_error_handler_muted: Option<bool>,
+}
+
+#[derive(Serialize)]
+pub struct ScriptHistory {
+    pub script_hash: ScriptHash,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_msg: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ScriptHistoryUpdate {
+    pub deployment_msg: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -209,7 +242,9 @@ pub struct NewScript {
     pub content: String,
     pub schema: Option<Schema>,
     pub is_template: Option<bool>,
-    pub lock: Option<Vec<String>>,
+    #[serde(default = "Option::default")]
+    #[serde(deserialize_with = "lock_deserialize")]
+    pub lock: Option<String>,
     pub language: ScriptLang,
     pub kind: Option<ScriptKind>,
     pub tag: Option<String>,
@@ -220,6 +255,59 @@ pub struct NewScript {
     pub cache_ttl: Option<i32>,
     pub dedicated_worker: Option<bool>,
     pub ws_error_handler_muted: Option<bool>,
+    pub priority: Option<i16>,
+    pub timeout: Option<i32>,
+    pub delete_after_use: Option<bool>,
+    pub restart_unless_cancelled: Option<bool>,
+    pub deployment_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency_key: Option<String>,
+}
+
+fn lock_deserialize<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    struct StringOrArrayVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for StringOrArrayVisitor {
+        type Value = Option<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("either a string or an array of strings")
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(Some(v.to_string()))
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut split_lock: Vec<String> = vec![];
+            loop {
+                if let Ok(Some(elem)) = seq.next_element::<String>() {
+                    split_lock.push(elem);
+                } else {
+                    break;
+                }
+            }
+            let lock = split_lock.join("\n");
+            return Ok(Some(lock));
+        }
+    }
+    deserializer.deserialize_any(StringOrArrayVisitor)
 }
 
 #[derive(Deserialize)]
@@ -259,15 +347,10 @@ pub fn to_hex_string(i: &i64) -> String {
 
 #[cfg(feature = "reqwest")]
 pub async fn get_hub_script_by_path(
-    email: &str,
     path: StripPath,
     http_client: &reqwest::Client,
+    db: &DB,
 ) -> crate::error::Result<String> {
-    use crate::{
-        error::{to_anyhow, Error},
-        utils::http_get_from_hub,
-    };
-
     let path = path
         .to_path()
         .strip_prefix("hub/")
@@ -276,9 +359,9 @@ pub async fn get_hub_script_by_path(
     let content = http_get_from_hub(
         http_client,
         &format!("https://hub.windmill.dev/raw/{path}.ts"),
-        email,
         true,
         None,
+        db,
     )
     .await?
     .text()
@@ -289,15 +372,10 @@ pub async fn get_hub_script_by_path(
 
 #[cfg(feature = "reqwest")]
 pub async fn get_full_hub_script_by_path(
-    email: &str,
     path: StripPath,
     http_client: &reqwest::Client,
+    db: &DB,
 ) -> crate::error::Result<HubScript> {
-    use crate::{
-        error::{to_anyhow, Error},
-        utils::http_get_from_hub,
-    };
-
     let path = path
         .to_path()
         .strip_prefix("hub/")
@@ -306,9 +384,9 @@ pub async fn get_full_hub_script_by_path(
     let value = http_get_from_hub(
         http_client,
         &format!("https://hub.windmill.dev/raw2/{path}"),
-        email,
         true,
         None,
+        db,
     )
     .await?
     .json::<HubScript>()

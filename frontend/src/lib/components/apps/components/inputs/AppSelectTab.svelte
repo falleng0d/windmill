@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte'
+	import { getContext, onDestroy } from 'svelte'
 
 	import type {
 		AppViewerContext,
@@ -41,6 +41,10 @@
 	let selected: string = ''
 	$: selected === '' && resolvedConfig && setDefaultValue()
 
+	onDestroy(() => {
+		listInputs?.remove(id)
+	})
+
 	$componentControl[id] = {
 		setValue(nvalue: string) {
 			selected = nvalue
@@ -52,7 +56,7 @@
 
 	function setDefaultValue() {
 		if (resolvedConfig.defaultValue === undefined) {
-			selected = resolvedConfig.items[0].value
+			selected = resolvedConfig.items?.[0]?.value
 		} else if (resolvedConfig.defaultValue) {
 			selected = resolvedConfig.defaultValue
 		}
@@ -61,7 +65,7 @@
 	function handleSelection(value: string) {
 		outputs?.result.set(value)
 		if (iterContext && listInputs) {
-			listInputs(id, value)
+			listInputs.set(id, value)
 		}
 	}
 

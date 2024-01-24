@@ -1,11 +1,16 @@
 <script lang="ts">
-	import { copyToClipboard, pluralize, truncate } from '$lib/utils'
+	import { copyToClipboard, emptyString, pluralize, truncate } from '$lib/utils'
 
 	import { createEventDispatcher } from 'svelte'
 	import { Badge } from '../common'
 	import { computeKey } from './utils'
 	import WarningMessage from './WarningMessage.svelte'
 	import { NEVER_TESTED_THIS_FAR } from '../flows/models'
+	import Portal from 'svelte-portal'
+	import { Download, PanelRightOpen } from 'lucide-svelte'
+	import S3FilePicker from '../S3FilePicker.svelte'
+	import { HelpersService } from '$lib/gen'
+	import { workspaceStore } from '$lib/stores'
 
 	export let json: any
 	export let level = 0
@@ -17,8 +22,10 @@
 	export let topLevelNode = false
 	export let allowCopy = true
 
+	let s3FileViewer: S3FilePicker
+
 	const collapsedSymbol = '...'
-	$: keys = getTypeAsString(json) === 'object' ? Object.keys(json) : []
+	$: keys = ['object', 's3object'].includes(getTypeAsString(json)) ? Object.keys(json) : []
 	$: isArray = Array.isArray(json)
 	$: openBracket = isArray ? '[' : '{'
 	$: closeBracket = isArray ? ']' : '}'
@@ -29,6 +36,9 @@
 		}
 		if (arg === undefined) {
 			return 'undefined'
+		}
+		if (Object.keys(arg).length === 1 && Object.keys(arg).includes('s3')) {
+			return 's3object'
 		}
 		return typeof arg
 	}
@@ -47,14 +57,33 @@
 		dispatch('select', rawKey ? key : computeKey(key, isArray, currentPath))
 	}
 
+	async function downloadS3File(fileKey: string | undefined) {
+		if (emptyString(fileKey)) {
+			return
+		}
+		const downloadUrl = await HelpersService.generateDownloadUrl({
+			workspace: $workspaceStore!,
+			fileKey: fileKey!
+		})
+		console.log('download URL ', downloadUrl.download_url)
+		window.open(downloadUrl.download_url, '_blank')
+	}
+
 	$: keyLimit = isArray ? 1 : 100
+
+	$: fullyCollapsed = keys.length > 1 && collapsed
 </script>
 
+<Portal>
+	<S3FilePicker bind:this={s3FileViewer} readOnlyMode={true} />
+</Portal>
+
 {#if keys.length > 0}
-	{#if !collapsed}
+	{#if !fullyCollapsed}
 		<span>
-			{#if level != 0}
+			{#if level != 0 && keys.length > 1}
 				<!-- svelte-ignore a11y-click-events-have-key-events -->
+				<!-- svelte-ignore a11y-no-static-element-interactions -->
 				<span class="cursor-pointer border hover:bg-surface-hover px-1 rounded" on:click={collapse}>
 					-
 				</span>
@@ -88,7 +117,7 @@
 							/>
 						{:else}
 							<button
-								class="val {pureViewer
+								class="val text-left {pureViewer
 									? 'cursor-auto'
 									: ''} rounded px-1 hover:bg-blue-100 {getTypeAsString(json[key])}"
 								on:click={() => selectProp(key, json[key])}
@@ -117,19 +146,38 @@
 					</button>
 				{/if}
 			</ul>
-			{#if level == 0 && topBrackets}<span class="h-0">{closeBracket}</span>{/if}
+			{#if level == 0 && topBrackets}
+				<span class="h-0">{closeBracket}</span>
+				{#if getTypeAsString(json) === 's3object'}
+					<button
+						class="text-secondary underline text-2xs whitespace-nowrap"
+						on:click={() => {
+							downloadS3File(json?.s3)
+						}}
+						><span class="flex items-center gap-1"><Download size={12} />download</span>
+					</button>
+					<button
+						class="text-secondary underline text-2xs whitespace-nowrap ml-1"
+						on:click={() => {
+							s3FileViewer?.open?.(json)
+						}}
+						><span class="flex items-center gap-1"><PanelRightOpen size={12} />open preview</span>
+					</button>
+				{/if}
+			{/if}
 		</span>
 	{/if}
 
 	<!-- svelte-ignore a11y-click-events-have-key-events -->
+	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<span
 		class="border border-blue-600 rounded px-1 cursor-pointer hover:bg-gray-200"
-		class:hidden={!collapsed}
+		class:hidden={!fullyCollapsed}
 		on:click={collapse}
 	>
 		{openBracket}{collapsedSymbol}{closeBracket}
 	</span>
-	{#if collapsed}
+	{#if fullyCollapsed}
 		<span class="text-tertiary text-xs">
 			{pluralize(Object.keys(json).length, Array.isArray(json) ? 'item' : 'key')}
 		</span>
@@ -160,6 +208,7 @@
 
 	.val.number {
 		@apply text-orange-600;
+		@apply font-mono;
 	}
 	.val.boolean {
 		@apply text-blue-600;

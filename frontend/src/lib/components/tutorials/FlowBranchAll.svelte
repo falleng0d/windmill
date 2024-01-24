@@ -3,8 +3,8 @@
 	import type { FlowEditorContext } from '../flows/types'
 	import { triggerAddFlowStep, selectFlowStepKind } from './utils'
 	import Tutorial from './Tutorial.svelte'
-	import { nextId } from '../flows/flowStateUtils'
 	import { updateProgress } from '$lib/tutorialUtils'
+	import { nextId } from '../flows/flowModuleNextId'
 
 	const { flowStore, flowStateStore } = getContext<FlowEditorContext>('FlowEditorContext')
 
@@ -29,7 +29,7 @@
 		const steps = [
 			{
 				popover: {
-					title: 'Welcome to the Windmil Flow editor',
+					title: 'Branch all tutorial',
 					description:
 						'Learn how to build our first branch to be executed on a condition. You can use arrow keys to navigate'
 				}

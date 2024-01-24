@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 
 info:
-  version: 1.186.0
+  version: 1.252.0
   title: OpenFlow Spec
   contact:
     name: Ruben Fiszel
@@ -54,6 +54,10 @@ components:
           type: string
         cache_ttl:
           type: number
+        priority:
+          type: number
+        early_return:
+          type: string
       required:
         - modules
 
@@ -76,6 +80,10 @@ components:
               type: integer
             seconds:
               type: integer
+            random_factor:
+              type: integer
+              minimum: 0
+              maximum: 100
 
     FlowModule:
       type: object
@@ -99,6 +107,8 @@ components:
           type: number
         timeout:
           type: number
+        delete_after_use:
+          type: boolean
         summary:
           type: string
         mock:
@@ -123,6 +133,8 @@ components:
               type: boolean
             user_groups_required:
               $ref: "#/components/schemas/InputTransform"
+        priority:
+          type: number
 
         retry:
           $ref: "#/components/schemas/Retry"
@@ -210,6 +222,7 @@ components:
             - mysql
             - bigquery
             - snowflake
+            - mssql
             - graphql
             - nativets
         path:

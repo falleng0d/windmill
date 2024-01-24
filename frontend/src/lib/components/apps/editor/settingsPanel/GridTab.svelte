@@ -1,7 +1,6 @@
 <script lang="ts">
 	import Button from '$lib/components/common/button/Button.svelte'
 	import CloseButton from '$lib/components/common/CloseButton.svelte'
-	import { faPlus } from '@fortawesome/free-solid-svg-icons'
 	import { getContext, tick } from 'svelte'
 	import type { AppViewerContext, RichConfiguration } from '../../types'
 	import { deleteGridItem } from '../appUtils'
@@ -9,7 +8,7 @@
 	import PanelSection from './common/PanelSection.svelte'
 	import { dndzone } from 'svelte-dnd-action'
 	import { generateRandomString } from '$lib/utils'
-	import { GripVertical } from 'lucide-svelte'
+	import { GripVertical, Plus } from 'lucide-svelte'
 	import GridTabDisabled from './GridTabDisabled.svelte'
 
 	export let tabs: string[] = []
@@ -22,8 +21,12 @@
 	export let component: AppComponent
 
 	$: if (disabledTabs == undefined) {
-		disabledTabs = []
+		disabledTabs = [
+			{ type: 'static', value: false, fieldType: 'boolean' },
+			{ type: 'static', value: false, fieldType: 'boolean' }
+		]
 	}
+
 	let items = tabs.map((tab, index) => {
 		return { value: tab, id: generateRandomString(), originalIndex: index }
 	})
@@ -159,6 +162,7 @@
 			use:dndzone={{
 				items,
 				flipDurationMs: 200,
+				dragDisabled,
 				dropTargetStyle: {}
 			}}
 			on:consider={handleConsider}
@@ -179,17 +183,19 @@
 
 						<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
 
+						<!-- svelte-ignore a11y-no-static-element-interactions -->
 						<div
 							tabindex={dragDisabled ? 0 : -1}
 							class="w-4 h-4"
 							on:mousedown={startDrag}
 							on:touchstart={startDrag}
 							on:keydown={handleKeyDown}
+							aria-label="drag-handle"
+							style={dragDisabled ? 'cursor: grab' : 'cursor: grabbing'}
 						>
 							<GripVertical size={16} />
 						</div>
 					</div>
-
 					{#if canDisableTabs && disabledTabs}
 						<GridTabDisabled bind:field={disabledTabs[index]} id={component.id} />
 					{/if}
@@ -200,7 +206,7 @@
 			size="xs"
 			color="light"
 			variant="border"
-			startIcon={{ icon: faPlus }}
+			startIcon={{ icon: Plus }}
 			on:click={addTab}
 			iconOnly
 		/>

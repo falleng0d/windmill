@@ -64,6 +64,10 @@ export function isSuperset(
 
 export function showDiff(local: string, remote: string) {
   let finalString = "";
+  if (local?.length > 20000 || remote?.length > 20000) {
+    log.info("Diff too large to display");
+    return;
+  }
   for (const part of Diff.diffLines(local, remote)) {
     if (part.removed) {
       // print red if removed without newline
@@ -93,33 +97,35 @@ export function showConflict(path: string, local: string, remote: string) {
   log.info("\n");
 }
 
-export function pushObj(
+export async function pushObj(
   workspace: string,
   p: string,
   befObj: any,
   newObj: any,
   plainSecrets: boolean,
-  checkForCreate: boolean
+  message?: string
 ) {
   const typeEnding = getTypeStrFromPath(p);
 
   if (typeEnding === "app") {
-    pushApp(workspace, p, befObj, newObj, checkForCreate);
+    await pushApp(workspace, p, befObj, newObj, message);
   } else if (typeEnding === "folder") {
-    pushFolder(workspace, p, befObj, newObj, checkForCreate);
+    await pushFolder(workspace, p, befObj, newObj);
   } else if (typeEnding === "variable") {
-    pushVariable(workspace, p, befObj, newObj, plainSecrets, checkForCreate);
+    await pushVariable(workspace, p, befObj, newObj, plainSecrets);
   } else if (typeEnding === "flow") {
-    const flowName = p.split(".flow/")[0];
-    pushFlow(workspace, flowName, flowName + ".flow");
+    const flowName = p.split(".flow" + path.sep)[0];
+    await pushFlow(workspace, flowName, flowName + ".flow", message);
   } else if (typeEnding === "resource") {
-    pushResource(workspace, p, befObj, newObj, checkForCreate);
+    await pushResource(workspace, p, befObj, newObj);
   } else if (typeEnding === "resource-type") {
-    pushResourceType(workspace, p, befObj, newObj, checkForCreate);
+    await pushResourceType(workspace, p, befObj, newObj);
   } else if (typeEnding === "schedule") {
-    pushSchedule(workspace, p, befObj, newObj, checkForCreate);
+    await pushSchedule(workspace, p, befObj, newObj);
   } else {
-    throw new Error("infer type unreachable");
+    throw new Error(
+      `The item ${p} has an unrecognized type ending ${typeEnding}`
+    );
   }
 }
 
@@ -150,7 +156,7 @@ export function getTypeStrFromPath(
   | "folder"
   | "app"
   | "schedule" {
-  if (p.includes(".flow/")) {
+  if (p.includes(".flow" + path.sep)) {
     return "flow";
   }
   const parsed = path.parse(p);
@@ -159,7 +165,9 @@ export function getTypeStrFromPath(
     parsed.ext == ".ts" ||
     parsed.ext == ".sh" ||
     parsed.ext == ".py" ||
-    parsed.ext == ".sql"
+    parsed.ext == ".sql" ||
+    parsed.ext == ".gql" ||
+    parsed.ext == ".ps1"
   ) {
     return "script";
   }

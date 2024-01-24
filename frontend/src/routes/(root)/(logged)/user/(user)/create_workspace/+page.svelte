@@ -4,7 +4,7 @@
 	import { validateUsername } from '$lib/utils'
 	import { logoutWithRedirect } from '$lib/logout'
 	import { page } from '$app/stores'
-	import { switchWorkspace, usersWorkspaceStore } from '$lib/stores'
+	import { usersWorkspaceStore } from '$lib/stores'
 	import CenteredModal from '$lib/components/CenteredModal.svelte'
 	import { Button } from '$lib/components/common'
 	import Toggle from '$lib/components/Toggle.svelte'
@@ -12,6 +12,8 @@
 	import { onMount } from 'svelte'
 	import { sendUserToast } from '$lib/toast'
 	import TestOpenaiKey from '$lib/components/copilot/TestOpenaiKey.svelte'
+	import { switchWorkspace } from '$lib/storeUtils'
+	import { isCloudHosted } from '$lib/cloud'
 
 	const rd = $page.url.searchParams.get('rd')
 
@@ -54,7 +56,7 @@
 		if (auto_invite) {
 			await WorkspaceService.editAutoInvite({
 				workspace: id,
-				requestBody: { operator: operatorOnly }
+				requestBody: { operator: operatorOnly, invite_all: !isCloudHosted() }
 			})
 		}
 		if (openAiKey != '') {
@@ -113,6 +115,7 @@
 			} else {
 				uname = x.email.split('@')[0]
 			}
+			uname = uname.replace(/\./gi, '')
 			username = uname.toLowerCase()
 		})
 
@@ -179,13 +182,17 @@
 	<Toggle
 		disabled={!isDomainAllowed}
 		bind:checked={auto_invite}
-		options={{ right: `Auto invite users with the same email address domain (${domain})` }}
+		options={{
+			right: isCloudHosted()
+				? `Auto-invite anyone from ${domain}`
+				: `Auto-invite anyone joining the instance`
+		}}
 	/>
 	<div class="flex items-center gap-1">
 		<Toggle
 			disabled={!auto_invite}
 			bind:checked={operatorOnly}
-			options={{ right: `Auto invite users as operators` }}
+			options={{ right: `Auto-invite users as operators` }}
 		/>
 		<Tooltip
 			>An operator can only execute and view scripts/flows/apps from your workspace, and only those

@@ -50,7 +50,10 @@
 					summary: summary ?? '',
 					description: flow.description,
 					value: flow.value,
-					schema: flow.schema
+					schema: flow.schema,
+					tag: flow.tag,
+					dedicated_worker: flow.dedicated_worker,
+					ws_error_handler_muted: flow.ws_error_handler_muted
 				}
 			})
 		} else if (kind == 'script') {
@@ -64,7 +67,7 @@
 				requestBody: {
 					...script,
 					description: script.description ?? '',
-					lock: script.lock?.split('\n'),
+					lock: script.lock,
 					parent_hash: script.hash,
 					path: path ?? ''
 				}

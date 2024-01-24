@@ -50,6 +50,7 @@
 	}
 
 	function closeDrawer(): void {
+		console.log('Close drawer')
 		open = false
 	}
 
@@ -58,14 +59,23 @@
 		configuration
 	)
 
+	let unclickableOutside = false
+	function unclosableModal() {
+		unclickableOutside = true
+		setTimeout(() => {
+			unclickableOutside = false
+		}, 1000)
+	}
 	$componentControl[id] = {
 		openModal: () => {
+			unclosableModal()
 			open = true
 		},
 		closeModal: () => {
 			open = false
 		},
 		open: () => {
+			unclosableModal()
 			open = true
 		},
 		close: () => {
@@ -106,7 +116,10 @@
 					resolvedConfig?.buttonFillContainer ? 'w-full h-full' : '',
 					css?.buttonContainer?.class,
 					'wm-button-container',
-					'wm-modal-button-container'
+					'wm-modal-button-container',
+					resolvedConfig?.hideButtonOnView && $mode == 'preview'
+						? 'invisible h-0 overflow-hidden'
+						: ''
 				)}
 				style={css?.button?.style}
 				wrapperStyle={css?.buttonContainer?.style}
@@ -136,7 +149,7 @@
 			`${
 				$mode == 'dnd' ? 'absolute' : 'fixed'
 			} top-0 bottom-0 left-0 right-0 transition-all duration-50`,
-			open ? ' bg-black bg-opacity-60' : 'h-0 overflow-hidden',
+			open ? ' bg-black bg-opacity-60' : 'h-0 overflow-hidden invisible',
 			$mode === 'dnd' ? 'z-[1000]' : 'z-[1100]'
 		)}
 	>
@@ -144,8 +157,8 @@
 			style={css?.popup?.style}
 			class={twMerge('mx-24 mt-8 bg-surface rounded-lg relative', css?.popup?.class)}
 			use:clickOutside={false}
-			on:click_outside={() => {
-				if ($mode !== 'dnd') {
+			on:click_outside={(e) => {
+				if ($mode !== 'dnd' && !unclickableOutside) {
 					closeDrawer()
 				}
 			}}

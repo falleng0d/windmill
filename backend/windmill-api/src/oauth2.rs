@@ -38,16 +38,13 @@ use windmill_common::jobs::JobPayload;
 use windmill_common::more_serde::maybe_number_opt;
 use windmill_common::users::username_to_permissioned_as;
 use windmill_common::utils::{not_found_if_none, now_from_db};
+use windmill_common::variables::build_crypt;
 
 use crate::db::ApiAuthed;
 use crate::saml::SamlSsoLogin;
 use crate::users::{login_externally, LoginUserInfo};
 use crate::webhook_util::{InstanceEvent, WebhookShared};
-use crate::{
-    db::DB,
-    variables::{build_crypt, encrypt},
-    workspaces::WorkspaceSettings,
-};
+use crate::{db::DB, variables::encrypt, workspaces::WorkspaceSettings};
 use crate::{BASE_URL, HTTP_CLIENT, IS_SECURE, OAUTH_CLIENTS, SLACK_SIGNING_SECRET};
 use windmill_common::error::{self, to_anyhow, Error};
 use windmill_common::oauth2::*;
@@ -55,8 +52,6 @@ use windmill_common::oauth2::*;
 use windmill_queue::PushIsolationLevel;
 
 use std::{fs, str};
-
-pub const WORKSPACE_SLACK_BOT_TOKEN_PATH: &str = "f/slack_bot/bot_token";
 
 pub fn global_service() -> Router {
     Router::new()
@@ -287,7 +282,7 @@ pub fn build_oauth_clients(
         })
         .flatten();
     let all_clients = AllClients { logins, connects, slack };
-    tracing::info!("Final oauth config: {all_clients:#?}");
+    tracing::debug!("Final oauth config: {all_clients:#?}");
     Ok(all_clients)
 }
 
@@ -387,7 +382,6 @@ async fn connect(
 #[derive(Deserialize)]
 struct CreateAccount {
     client: String,
-    owner: String,
     refresh_token: Option<String>,
     expires_in: i64,
 }
@@ -401,11 +395,10 @@ async fn create_account(
     let mut tx = user_db.begin(&authed).await?;
 
     let id = sqlx::query_scalar!(
-        "INSERT INTO account (workspace_id, client, owner, expires_at, refresh_token) VALUES ($1, \
-         $2, $3, now() + ($4 || ' seconds')::interval, $5) RETURNING id",
+        "INSERT INTO account (workspace_id, client, expires_at, refresh_token) VALUES ($1, \
+         $2, now() + ($3 || ' seconds')::interval, $4) RETURNING id",
         w_id,
         payload.client,
-        payload.owner,
         payload.expires_in.to_string(),
         payload.refresh_token
     )
@@ -739,7 +732,7 @@ async fn connect_slack_callback(
         "INSERT INTO group_ (workspace_id, name, summary, extra_perms) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
         w_id,
         "slack",
-        "The group slack commands act on belhalf of",
+        "The group slack commands act on behalf of",
         serde_json::json!({username_to_permissioned_as(&authed.username): true})
     )
     .execute(&mut *tx)
@@ -860,7 +853,10 @@ async fn slack_command(
     if let Some(settings) = settings {
         if let Some(path) = &settings.slack_command_script {
             let (payload, tag) = if let Some(path) = path.strip_prefix("flow/") {
-                (JobPayload::Flow(path.to_string()), None)
+                (
+                    JobPayload::Flow { path: path.to_string(), dedicated_worker: None },
+                    None,
+                )
             } else {
                 let path = path.strip_prefix("script/").unwrap_or_else(|| path);
                 let (
@@ -871,6 +867,9 @@ async fn slack_command(
                     cache_ttl,
                     language,
                     dedicated_worker,
+                    priority,
+                    _delete_after_use,
+                    _timeout,
                 ) = windmill_common::get_latest_deployed_hash_for_path(
                     &db,
                     &settings.workspace_id,
@@ -886,6 +885,7 @@ async fn slack_command(
                         cache_ttl,
                         language,
                         dedicated_worker,
+                        priority,
                     },
                     tag,
                 )
@@ -917,6 +917,7 @@ async fn slack_command(
                 None,
                 true,
                 tag,
+                None,
                 None,
                 None,
             )

@@ -18,7 +18,8 @@ const layout: ComponentSet = {
 		'horizontalsplitpanescomponent',
 		'modalcomponent',
 		'steppercomponent',
-		'carousellistcomponent'
+		'carousellistcomponent',
+		'decisiontreecomponent'
 	]
 } as const
 
@@ -42,6 +43,7 @@ const inputs: ComponentSet = {
 		'rangecomponent',
 		'dateinputcomponent',
 		'fileinputcomponent',
+		's3fileinputcomponent',
 		'checkboxcomponent',
 		'selectcomponent',
 		'resourceselectcomponent',
@@ -63,25 +65,25 @@ const display: ComponentSet = {
 		'pdfcomponent',
 		'displaycomponent',
 		'jobidlogcomponent',
-		'jobidflowstatuscomponent'
+		'jobidflowstatuscomponent',
+		'statcomponent',
+		'menucomponent'
 	]
 } as const
 
 const tables: ComponentSet = {
 	title: 'Tables',
-	components: ['tablecomponent', 'aggridcomponent', 'aggridcomponentee']
+	components: ['tablecomponent', 'aggridcomponent', 'aggridcomponentee', 'dbexplorercomponent']
 } as const
 
 const charts: ComponentSet = {
 	title: 'Charts',
 	components: [
-		'barchartcomponent',
-		'piechartcomponent',
+		'plotlycomponentv2',
+		'chartjscomponentv2',
 		'vegalitecomponent',
-		'plotlycomponent',
-		'scatterchartcomponent',
-		'timeseriescomponent',
-		'chartjscomponent'
+		'agchartscomponent',
+		'agchartscomponentee'
 	]
 } as const
 

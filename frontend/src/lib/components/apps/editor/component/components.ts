@@ -40,7 +40,12 @@ import {
 	PanelLeft,
 	PanelTopInactive,
 	ListIcon,
-	Heading1
+	Heading1,
+	FileBarChart,
+	Menu,
+	Network,
+	Database,
+	UploadCloud
 } from 'lucide-svelte'
 import type {
 	Aligned,
@@ -53,7 +58,7 @@ import type {
 } from '../../types'
 import type { Size } from '../../svelte-grid/types'
 
-import type { AppInputSpec, ResultAppInput, StaticAppInput } from '../../inputType'
+import type { AppInputSpec, EvalV2AppInput, ResultAppInput, StaticAppInput } from '../../inputType'
 
 export type BaseComponent<T extends string> = {
 	type: T
@@ -63,6 +68,12 @@ export type RecomputeOthersSource = {
 	recomputeIds: string[] | undefined
 }
 
+export type CustomComponentConfig = {
+	name: string
+	additionalLibs?: {
+		reactVersion?: string
+	}
+}
 export type TextComponent = BaseComponent<'textcomponent'>
 export type TextInputComponent = BaseComponent<'textinputcomponent'>
 export type QuillComponent = BaseComponent<'quillcomponent'>
@@ -75,9 +86,16 @@ export type CurrencyComponent = BaseComponent<'currencycomponent'>
 export type SliderComponent = BaseComponent<'slidercomponent'>
 export type RangeComponent = BaseComponent<'rangecomponent'>
 export type HtmlComponent = BaseComponent<'htmlcomponent'>
+export type CustomComponent = BaseComponent<'customcomponent'> & {
+	customComponent: CustomComponentConfig
+}
 export type MarkdownComponent = BaseComponent<'mardowncomponent'>
 export type VegaLiteComponent = BaseComponent<'vegalitecomponent'>
 export type PlotlyComponent = BaseComponent<'plotlycomponent'>
+export type PlotlyComponentV2 = BaseComponent<'plotlycomponentv2'> & {
+	xData: RichConfiguration | undefined
+	datasets: RichConfiguration | undefined
+}
 export type TimeseriesComponent = BaseComponent<'timeseriescomponent'>
 export type ButtonComponent = BaseComponent<'buttoncomponent'> & RecomputeOthersSource
 export type DownloadComponent = BaseComponent<'downloadcomponent'>
@@ -88,6 +106,21 @@ export type RunFormComponent = BaseComponent<'runformcomponent'>
 export type BarChartComponent = BaseComponent<'barchartcomponent'>
 export type PieChartComponent = BaseComponent<'piechartcomponent'>
 export type ChartJsComponent = BaseComponent<'chartjscomponent'>
+export type ChartJsComponentV2 = BaseComponent<'chartjscomponentv2'> & {
+	xData: RichConfiguration | undefined
+	datasets: RichConfiguration | undefined
+}
+
+export type AgChartsComponent = BaseComponent<'agchartscomponent'> & {
+	xData: RichConfiguration | undefined
+	datasets: RichConfiguration | undefined
+}
+
+export type AgChartsComponentEe = BaseComponent<'agchartscomponentee'> & {
+	license: string
+	xData: RichConfiguration | undefined
+	datasets: RichConfiguration | undefined
+}
 
 export type ScatterChartComponent = BaseComponent<'scatterchartcomponent'>
 
@@ -145,8 +178,33 @@ export type SelectTabComponent = BaseComponent<'selecttabcomponent'>
 export type SelectStepComponent = BaseComponent<'selectstepcomponent'>
 
 export type CarouselListComponent = BaseComponent<'carousellistcomponent'>
+export type StatisticCardComponent = BaseComponent<'statcomponent'>
+export type MenuComponent = BaseComponent<'menucomponent'> & {
+	menuItems: (BaseAppComponent & ButtonComponent & GridItem)[]
+}
+
+export type DBExplorerComponent = BaseComponent<'dbexplorercomponent'> & {
+	columns: RichConfiguration
+}
+
+export type S3FileInputComponent = BaseComponent<'s3fileinputcomponent'>
+
+export type DecisionTreeNode = {
+	id: string
+	label: string
+	allowed: RichConfiguration | undefined
+	next: Array<{
+		id: string
+		condition?: RichConfiguration | undefined
+	}>
+}
+
+export type DecisionTreeComponent = BaseComponent<'decisiontreecomponent'> & {
+	nodes: DecisionTreeNode[]
+}
 
 export type TypedComponent =
+	| DBExplorerComponent
 	| DisplayComponent
 	| LogComponent
 	| JobIdLogComponent
@@ -165,6 +223,7 @@ export type TypedComponent =
 	| BarChartComponent
 	| TimeseriesComponent
 	| HtmlComponent
+	| CustomComponent
 	| MarkdownComponent
 	| TableComponent
 	| TextComponent
@@ -203,6 +262,14 @@ export type TypedComponent =
 	| DownloadComponent
 	| ChartJsComponent
 	| CarouselListComponent
+	| PlotlyComponentV2
+	| ChartJsComponentV2
+	| StatisticCardComponent
+	| MenuComponent
+	| DecisionTreeComponent
+	| S3FileInputComponent
+	| AgChartsComponent
+	| AgChartsComponentEe
 
 export type AppComponent = BaseAppComponent & TypedComponent
 
@@ -219,10 +286,12 @@ export function getRecommendedDimensionsByComponent(
 	return { w: +size[0], h: +size[1] }
 }
 
+export type Quickstyle = { quickCss?: string[]; quickTailwindClasses?: string[] }
 export type AppComponentConfig<T extends TypedComponent['type']> = {
 	name: string
 	icon: any
 	documentationLink: string
+	quickstyle?: Record<string, Quickstyle>
 	/**
 	 * Dimensions key formula:
 	 * [**mobile width**]:[**mobile height**]-[**desktop width**]:[**desktop height**]
@@ -246,15 +315,17 @@ export type PresetComponentConfig = {
 }
 
 export interface InitialAppComponent extends Partial<Aligned> {
-	componentInput?: StaticAppInput | ResultAppInput | undefined
+	componentInput?: StaticAppInput | ResultAppInput | EvalV2AppInput | undefined
 	configuration: StaticRichConfigurations
 	// Number of subgrids
 	numberOfSubgrids?: number
 	recomputeIds?: boolean
 	actionButtons?: boolean
+	menuItems?: boolean
 	tabs?: string[]
 	panes?: number[]
 	conditions?: AppInputSpec<'boolean', boolean>[]
+	nodes?: DecisionTreeNode[]
 }
 
 const buttonColorOptions = [...BUTTON_COLORS]
@@ -293,7 +364,13 @@ export const selectOptions = {
 		'scatter'
 	] as ChartType[],
 	animationTimingFunctionOptions: ['linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out'],
-	prose: ['sm', 'Default', 'lg', 'xl', '2xl']
+	prose: ['sm', 'Default', 'lg', 'xl', '2xl'],
+	imageSourceKind: [
+		'url',
+		'png encoded as base64',
+		'jpeg encoded as base64',
+		'svg encoded as base64'
+	]
 }
 const labels = {
 	none: 'Do nothing',
@@ -305,7 +382,8 @@ const labels = {
 	open: 'Open a modal or a drawer',
 	close: 'Close a modal or a drawer',
 	openModal: 'Open a modal (deprecated)',
-	closeModal: 'Close a modal (deprecated)'
+	closeModal: 'Close a modal (deprecated)',
+	clearFiles: 'Clear files from a S3 file input'
 }
 
 const onSuccessClick = {
@@ -321,7 +399,8 @@ const onSuccessClick = {
 				fieldType: 'text',
 				type: 'static',
 				value: '',
-				placeholder: '/apps/get/foo'
+				placeholder: '/apps/get/foo',
+				onDemandOnly: true
 			},
 			newTab: {
 				tooltip: 'Open the url in a new tab',
@@ -336,7 +415,8 @@ const onSuccessClick = {
 				value: [] as Array<{ id: string; index: number }>,
 				fieldType: 'array',
 				subFieldType: 'tab-select',
-				tooltip: 'Set the tabs id and index to go to on success'
+				tooltip: 'Set the tabs id and index to go to on success',
+				onDemandOnly: true
 			}
 		},
 		sendToast: {
@@ -345,7 +425,8 @@ const onSuccessClick = {
 				fieldType: 'text',
 				type: 'static',
 				value: '',
-				placeholder: 'Hello there'
+				placeholder: 'Hello there',
+				onDemandOnly: true
 			}
 		},
 		openModal: {
@@ -381,6 +462,14 @@ const onSuccessClick = {
 				type: 'static',
 				value: ''
 			}
+		},
+		clearFiles: {
+			id: {
+				tooltip: 'The id of s3 file input to clear',
+				fieldType: 'text',
+				type: 'static',
+				value: ''
+			}
 		}
 	}
 } as const
@@ -398,7 +487,8 @@ const onErrorClick = {
 				fieldType: 'text',
 				type: 'static',
 				value: '',
-				placeholder: '/apps/get/foo'
+				placeholder: '/apps/get/foo',
+				onDemandOnly: true
 			},
 			newTab: {
 				tooltip: 'Open the url in a new tab',
@@ -422,7 +512,8 @@ const onErrorClick = {
 				fieldType: 'text',
 				type: 'static',
 				value: '',
-				placeholder: 'Hello there'
+				placeholder: 'Hello there',
+				onDemandOnly: true
 			},
 			appendError: {
 				tooltip: 'Append the error message to the toast',
@@ -489,7 +580,9 @@ const aggridcomponentconst = {
 	icon: Table2,
 	documentationLink: `${documentationBaseUrl}/aggrid_table`,
 	dims: '3:10-6:10' as AppComponentDimensions,
-	customCss: {},
+	customCss: {
+		container: { class: '', style: '' }
+	},
 	initialData: {
 		configuration: {
 			columnDefs: {
@@ -513,7 +606,7 @@ const aggridcomponentconst = {
 				type: 'static',
 				fieldType: 'boolean',
 				value: false,
-
+				hide: true,
 				tooltip: 'Configure all columns as Editable by users'
 			},
 			multipleSelectable: {
@@ -533,13 +626,26 @@ const aggridcomponentconst = {
 			pagination: {
 				type: 'static',
 				fieldType: 'boolean',
-				value: false
+				value: false as boolean | undefined
+			},
+			selectFirstRowByDefault: {
+				type: 'static',
+				fieldType: 'boolean',
+				value: true as boolean,
+				tooltip: 'Select the first row by default on start'
 			},
 			extraConfig: {
 				type: 'static',
 				fieldType: 'object',
 				value: {},
 				tooltip: 'any configuration that can be passed to ag-grid top level'
+			},
+			compactness: {
+				type: 'static',
+				fieldType: 'select',
+				value: 'normal',
+				selectOptions: ['normal', 'compact', 'comfortable'],
+				tooltip: 'Change the row height'
 			}
 		},
 		componentInput: {
@@ -559,6 +665,20 @@ const aggridcomponentconst = {
 				}
 			]
 		} as StaticAppInput
+	}
+} as const
+
+const agchartscomponentconst = {
+	name: 'AgCharts',
+	icon: BarChart4,
+	documentationLink: `${documentationBaseUrl}/agcharts`,
+	dims: '2:8-6:8' as AppComponentDimensions,
+	customCss: {
+		container: { class: '', style: '' }
+	},
+	initialData: {
+		configuration: {},
+		componentInput: undefined
 	}
 } as const
 
@@ -718,7 +838,7 @@ export const components = {
 				heightPx: {
 					type: 'static',
 					fieldType: 'number',
-					value: 280,
+					value: undefined,
 					tooltip: 'Height in pixels'
 				},
 
@@ -749,7 +869,13 @@ export const components = {
 							}
 						}
 					}
-				} as const
+				} as const,
+				displayBorders: {
+					type: 'static',
+					fieldType: 'boolean',
+					value: true,
+					tooltip: 'Display borders between items'
+				}
 			},
 			componentInput: {
 				type: 'static',
@@ -1083,7 +1209,7 @@ export const components = {
 					type: 'static',
 					fieldType: 'object',
 					value: {},
-					tooltip: 'ChartJs options object'
+					tooltip: 'ChartJs options object https://www.chartjs.org/docs/latest/general/options.html'
 				}
 			},
 			componentInput: {
@@ -1101,6 +1227,33 @@ export const components = {
 			}
 		}
 	},
+	chartjscomponentv2: {
+		name: 'ChartJs',
+		icon: PieChart,
+		documentationLink: `${documentationBaseUrl}/chartjs`,
+		dims: '2:8-6:8' as AppComponentDimensions,
+		customCss: {
+			container: { class: '', style: '' }
+		},
+		initialData: {
+			configuration: {
+				type: {
+					type: 'static',
+
+					fieldType: 'select',
+					selectOptions: selectOptions.chartTypeOptions,
+					value: 'pie'
+				},
+				options: {
+					type: 'static',
+					fieldType: 'object',
+					value: {},
+					tooltip: 'ChartJs options object https://www.chartjs.org/docs/latest/general/options.html'
+				}
+			},
+			componentInput: undefined
+		}
+	},
 	barchartcomponent: {
 		name: 'Bar/Line Chart',
 		icon: BarChart4,
@@ -1113,7 +1266,6 @@ export const components = {
 			configuration: {
 				theme: {
 					type: 'static',
-
 					fieldType: 'select',
 					selectOptions: selectOptions.chartThemeOptions,
 					value: 'theme1'
@@ -1132,6 +1284,9 @@ export const components = {
 			}
 		}
 	},
+
+	agchartscomponent: agchartscomponentconst,
+	agchartscomponentee: { ...agchartscomponentconst, name: 'AgCharts EE' },
 	htmlcomponent: {
 		name: 'HTML',
 		icon: Code2,
@@ -1150,6 +1305,23 @@ src="https://images.unsplash.com/photo-1554629947-334ff61d85dc?ixid=MnwxMjA3fDB8
 <h1 class="absolute top-4 left-2 text-white">
 Hello \${ctx.username}
 </h1>`
+			},
+			configuration: {}
+		}
+	},
+	customcomponent: {
+		name: 'Custom',
+		icon: Code2,
+		documentationLink: `https://www.windmill.dev/docs/apps/react_components`,
+		dims: '1:2-1:2' as AppComponentDimensions,
+		customCss: {
+			container: { class: '', style: '' }
+		},
+		initialData: {
+			componentInput: {
+				type: 'static',
+				fieldType: 'object',
+				value: {}
 			},
 			configuration: {}
 		}
@@ -1244,6 +1416,25 @@ This is a paragraph.
 					}
 				}
 			},
+			configuration: {
+				layout: {
+					type: 'static',
+					fieldType: 'object',
+					value: {},
+					tooltip:
+						'Layout options for the plot. See https://plotly.com/javascript/reference/layout/ for more information'
+				}
+			}
+		}
+	},
+	plotlycomponentv2: {
+		name: 'Plotly',
+		icon: PieChart,
+		documentationLink: `${documentationBaseUrl}/plotly`,
+		dims: '2:8-6:8' as AppComponentDimensions,
+		customCss: {},
+		initialData: {
+			componentInput: undefined,
 			configuration: {
 				layout: {
 					type: 'static',
@@ -1428,6 +1619,12 @@ This is a paragraph.
 					value: {},
 					tooltip:
 						'any configuration that can be passed to the tanstack table component as initial state (https://tanstack.com/table/v8/docs/api/core/table#initialstate)'
+				},
+				selectFirstRowByDefault: {
+					type: 'static',
+					fieldType: 'boolean',
+					value: true as boolean,
+					tooltip: 'Select the first row by default on start'
 				}
 			},
 			componentInput: {
@@ -1505,6 +1702,21 @@ This is a paragraph.
 					type: 'static',
 					value: undefined,
 					fieldType: 'text'
+				},
+				disabled: {
+					type: 'static',
+					value: false,
+					fieldType: 'boolean'
+				},
+				beforeIcon: {
+					type: 'static',
+					value: undefined,
+					fieldType: 'icon-select'
+				},
+				afterIcon: {
+					type: 'static',
+					value: undefined,
+					fieldType: 'icon-select'
 				}
 			}
 		}
@@ -1551,6 +1763,11 @@ This is a paragraph.
 					type: 'static',
 					value: undefined,
 					fieldType: 'text'
+				},
+				disabled: {
+					type: 'static',
+					value: false,
+					fieldType: 'boolean'
 				}
 			}
 		}
@@ -1897,6 +2114,21 @@ This is a paragraph.
 					type: 'static',
 					value: 'Password',
 					fieldType: 'text'
+				},
+				disabled: {
+					type: 'static',
+					value: false,
+					fieldType: 'boolean'
+				},
+				beforeIcon: {
+					type: 'static',
+					value: undefined,
+					fieldType: 'icon-select'
+				},
+				afterIcon: {
+					type: 'static',
+					value: undefined,
+					fieldType: 'icon-select'
 				}
 			}
 		}
@@ -1922,6 +2154,21 @@ This is a paragraph.
 					type: 'static',
 					value: undefined,
 					fieldType: 'text'
+				},
+				disabled: {
+					type: 'static',
+					value: false,
+					fieldType: 'boolean'
+				},
+				beforeIcon: {
+					type: 'static',
+					value: undefined,
+					fieldType: 'icon-select'
+				},
+				afterIcon: {
+					type: 'static',
+					value: undefined,
+					fieldType: 'icon-select'
 				}
 			}
 		}
@@ -2013,7 +2260,7 @@ This is a paragraph.
 	carousellistcomponent: {
 		name: 'Carousel List',
 		icon: ListIcon,
-		documentationLink: `${documentationBaseUrl}/list`,
+		documentationLink: `${documentationBaseUrl}/carousel`,
 		dims: '3:8-12:8' as AppComponentDimensions,
 		customCss: {
 			container: { class: '', style: '' }
@@ -2026,7 +2273,8 @@ This is a paragraph.
 
 					selectOptions: selectOptions.animationTimingFunctionOptions,
 					value: 'linear',
-					tooltip: 'See https://developer.mozilla.org/en-US/docs/Web/CSS/animation-timing-function'
+					tooltip:
+						'Sets how an animation progresses through the duration of each cycle, see https://developer.mozilla.org/en-US/docs/Web/CSS/animation-timing-function'
 				}
 			},
 			componentInput: {
@@ -2178,6 +2426,11 @@ This is a paragraph.
 					value: false,
 					fieldType: 'boolean',
 					tooltip: 'If enabled, the mime type of the file will be included.'
+				},
+				submittedFileText: {
+					type: 'static',
+					value: 'Selected file',
+					fieldType: 'text'
 				}
 			}
 		}
@@ -2201,6 +2454,12 @@ This is a paragraph.
 						accept: 'image/*',
 						convertTo: 'base64'
 					}
+				},
+				sourceKind: {
+					fieldType: 'select',
+					type: 'static',
+					selectOptions: selectOptions.imageSourceKind,
+					value: 'url' as (typeof selectOptions.imageSourceKind)[number]
 				},
 				imageFit: {
 					fieldType: 'select',
@@ -2239,6 +2498,12 @@ This is a paragraph.
 					type: 'static',
 					fieldType: 'text',
 					value: 'Drawer title'
+				},
+				hideButtonOnView: {
+					fieldType: 'boolean',
+					type: 'static',
+					value: false,
+					tooltip: 'Make button invisible when app is used outside of the edit mode'
 				},
 				label: {
 					type: 'static',
@@ -2410,6 +2675,12 @@ This is a paragraph.
 					fieldType: 'text',
 					value: 'Modal title'
 				},
+				hideButtonOnView: {
+					fieldType: 'boolean',
+					type: 'static',
+					value: false,
+					tooltip: 'Make button invisible when app is used outside of the edit mode'
+				},
 				buttonLabel: {
 					type: 'static',
 					fieldType: 'text',
@@ -2574,16 +2845,332 @@ This is a paragraph.
 			numberOfSubgrids: 2,
 			conditions: [
 				{
-					type: 'eval',
+					type: 'evalv2',
 					expr: 'false',
-					fieldType: 'boolean'
+					fieldType: 'boolean',
+					connections: []
 				},
 				{
-					type: 'eval',
+					type: 'evalv2',
 					expr: 'true',
-					fieldType: 'boolean'
+					fieldType: 'boolean',
+					connections: []
 				}
 			] as AppInputSpec<'boolean', boolean>[]
+		}
+	},
+	statcomponent: {
+		name: 'Statistic card',
+		icon: FileBarChart,
+		documentationLink: `${documentationBaseUrl}/statistic_card`,
+		dims: '2:4-3:4' as AppComponentDimensions,
+		quickstyle: {
+			title: {
+				quickCss: ['font-size: 1rem', 'font-size: 1.5rem', 'font-size: 2rem'],
+				quickTailwindClasses: ['text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl']
+			},
+			value: {
+				quickCss: ['font-size: 1rem', 'font-size: 1.5rem', 'font-size: 2rem'],
+				quickTailwindClasses: ['text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl']
+			}
+		} as Record<string, Quickstyle>,
+		customCss: {
+			title: {
+				class: '',
+				style: ''
+			},
+			container: { class: '', style: '' },
+			value: {
+				class: '',
+				style: ''
+			},
+			media: { class: '', style: '' }
+		},
+		initialData: {
+			configuration: {
+				title: {
+					type: 'static',
+					value: 'Title',
+					fieldType: 'text'
+				},
+				value: {
+					type: 'static',
+					value: 'Value',
+					fieldType: 'text'
+				},
+				progress: {
+					type: 'static',
+					value: 0,
+					fieldType: 'number'
+				},
+				media: {
+					type: 'oneOf',
+					selected: 'image',
+					labels: {
+						icon: 'Icon',
+						image: 'Image'
+					},
+					configuration: {
+						icon: {
+							icon: {
+								type: 'static',
+								value: undefined,
+								fieldType: 'icon-select'
+							}
+						},
+						image: {
+							source: {
+								type: 'static',
+								value: '/logo.svg',
+								fieldType: 'text',
+								fileUpload: {
+									accept: 'image/*',
+									convertTo: 'base64'
+								}
+							},
+							sourceKind: {
+								fieldType: 'select',
+								type: 'static',
+								selectOptions: selectOptions.imageSourceKind,
+								value: 'url' as (typeof selectOptions.imageSourceKind)[number]
+							}
+						}
+					}
+				} as const
+			}
+		}
+	},
+	menucomponent: {
+		name: 'Dropdown Menu',
+		icon: Menu,
+		documentationLink: `${documentationBaseUrl}/dropdown_menu`,
+		dims: '1:1-1:2' as AppComponentDimensions,
+		customCss: {
+			button: { style: '', class: '' }
+		},
+		initialData: {
+			...defaultAlignement,
+			componentInput: undefined,
+			configuration: {
+				label: {
+					type: 'static',
+					fieldType: 'text',
+					value: '' as string
+				},
+				color: {
+					fieldType: 'select',
+					type: 'static',
+					selectOptions: selectOptions.buttonColorOptions,
+					value: 'light'
+				},
+				size: {
+					fieldType: 'select',
+					type: 'static',
+
+					selectOptions: selectOptions.buttonSizeOptions,
+					value: 'xs'
+				},
+				fillContainer: {
+					fieldType: 'boolean',
+					type: 'static',
+
+					value: false
+				},
+				beforeIcon: {
+					type: 'static',
+					value: 'Menu',
+					fieldType: 'icon-select'
+				},
+				afterIcon: {
+					type: 'static',
+					value: undefined,
+					fieldType: 'icon-select'
+				}
+			},
+			menuItems: true
+		}
+	},
+	decisiontreecomponent: {
+		name: 'Decision Tree',
+		icon: Network,
+		documentationLink: `${documentationBaseUrl}/decision_tree`,
+		dims: '2:8-6:8' as AppComponentDimensions,
+		customCss: {
+			container: { class: '', style: '' }
+		},
+		initialData: {
+			configuration: {},
+			componentInput: undefined,
+			numberOfSubgrids: 1,
+			nodes: [
+				{
+					id: 'a',
+					label: 'a',
+					allowed: {
+						type: 'evalv2',
+						expr: 'true',
+						fieldType: 'boolean',
+						connections: []
+					},
+					next: []
+				}
+			] as DecisionTreeNode[]
+		}
+	},
+	s3fileinputcomponent: {
+		name: 'S3 File Uploader',
+		icon: UploadCloud,
+		documentationLink: `${documentationBaseUrl}/s3fileinput`,
+		dims: '2:8-6:8' as AppComponentDimensions,
+		customCss: {
+			container: { class: '', style: '' }
+		},
+		initialData: {
+			configuration: {
+				type: {
+					type: 'oneOf',
+					selected: 's3',
+					labels: {
+						s3: 'S3'
+					},
+					configuration: {
+						s3: {
+							resource: {
+								type: 'static',
+								fieldType: 'resource',
+								value: '',
+								subFieldType: 's3'
+							} as StaticAppInput,
+							acceptedFileTypes: {
+								type: 'static',
+								value: ['image/*', 'application/pdf'] as string[],
+								fieldType: 'array'
+							},
+							allowMultiple: {
+								type: 'static',
+								value: false,
+								fieldType: 'boolean',
+								tooltip: 'If allowed, the user will be able to select more than one file'
+							},
+							text: {
+								type: 'static',
+								value: 'Drag and drop files or click to select them',
+								fieldType: 'text'
+							},
+							/*
+							displayDirectLink: {
+								type: 'static',
+								value: false,
+								fieldType: 'boolean'
+							},
+							*/
+							pathTemplate: {
+								type: 'evalv2',
+								expr: `\`\${file.name}\``,
+								fieldType: 'template',
+								connections: [],
+								onDemandOnly: true
+							} as EvalV2AppInput
+						}
+					}
+				} as const
+			}
+		}
+	},
+	dbexplorercomponent: {
+		name: 'Database Studio',
+		icon: Database,
+		documentationLink: `${documentationBaseUrl}/dbexplorer`,
+		dims: '2:8-6:8' as AppComponentDimensions,
+		customCss: {
+			container: { class: '', style: '' }
+		},
+		initialData: {
+			configuration: {
+				type: {
+					type: 'oneOf',
+					selected: 'postgresql',
+					labels: {
+						postgresql: 'PostgreSQL',
+						msql: 'MySQL'
+					},
+					configuration: {
+						postgresql: {
+							resource: {
+								type: 'static',
+								fieldType: 'resource',
+								value: ''
+							} as StaticAppInput,
+							table: {
+								fieldType: 'select',
+								subfieldType: 'db-table',
+								type: 'static',
+								selectOptions: [],
+								value: undefined
+							}
+						}
+					}
+				} as const,
+				columnDefs: {
+					type: 'static',
+					fieldType: 'array',
+					subFieldType: 'db-explorer',
+					value: []
+				} as StaticAppInput,
+				whereClause: {
+					type: 'static',
+					fieldType: 'text',
+					value: ''
+				},
+				flex: {
+					type: 'static',
+					fieldType: 'boolean',
+					value: true,
+
+					tooltip: 'default col flex is 1 (see ag-grid docs)'
+				},
+				allEditable: {
+					type: 'static',
+					fieldType: 'boolean',
+					value: false,
+					hide: true,
+					tooltip: 'Configure all columns as Editable by users'
+				},
+				allowDelete: {
+					type: 'static',
+					fieldType: 'boolean',
+					value: false,
+					hide: true,
+					tooltip: 'Allow deleting rows'
+				},
+				multipleSelectable: {
+					type: 'static',
+					fieldType: 'boolean',
+					value: false,
+
+					tooltip: 'Make multiple rows selectable at once'
+				},
+				rowMultiselectWithClick: {
+					type: 'static',
+					fieldType: 'boolean',
+					value: true,
+
+					tooltip: 'If multiple selectable, allow multiselect with click'
+				},
+				selectFirstRowByDefault: {
+					type: 'static',
+					fieldType: 'boolean',
+					value: true as boolean,
+					tooltip: 'Select the first row by default on start'
+				},
+				extraConfig: {
+					type: 'static',
+					fieldType: 'object',
+					value: {},
+					tooltip: 'any configuration that can be passed to ag-grid top level'
+				}
+			},
+			componentInput: undefined
 		}
 	}
 } as const

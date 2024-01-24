@@ -1,44 +1,31 @@
 use std::{collections::HashMap, process::Stdio};
 
-#[cfg(feature = "enterprise")]
-use std::collections::VecDeque;
-
-#[cfg(feature = "enterprise")]
-use anyhow::Context;
-
 use base64::Engine;
 use itertools::Itertools;
 use regex::Regex;
 use serde_json::value::RawValue;
 use uuid::Uuid;
+use windmill_parser_ts::remove_pinned_imports;
+use windmill_queue::CanceledBy;
 
 #[cfg(feature = "enterprise")]
-use crate::{common::build_envs_map, JobCompleted};
+use crate::common::build_envs_map;
 
 use crate::{
     common::{
-        create_args_and_out_file, get_reserved_variables, handle_child, read_result, set_logs,
-        start_child_process, write_file, write_file_binary,
+        create_args_and_out_file, get_reserved_variables, handle_child, parse_npm_config,
+        read_result, set_logs, start_child_process, write_file, write_file_binary,
     },
-    AuthedClientBackgroundTask, BUN_CACHE_DIR, BUN_PATH, DISABLE_NSJAIL, DISABLE_NUSER, HOME_ENV,
-    NPM_CONFIG_REGISTRY, NSJAIL_PATH, PATH_ENV, TZ_ENV,
+    AuthedClientBackgroundTask, BUNFIG_INSTALL_SCOPES, BUN_CACHE_DIR, BUN_PATH, DISABLE_NSJAIL,
+    DISABLE_NUSER, HOME_ENV, NODE_PATH, NPM_CONFIG_REGISTRY, NSJAIL_PATH, PATH_ENV, TZ_ENV,
 };
 
-#[cfg(feature = "enterprise")]
-use crate::MAX_BUFFERED_DEDICATED_JOBS;
-
-use tokio::{
-    fs::{remove_dir_all, File},
-    process::Command,
-};
-
-#[cfg(feature = "enterprise")]
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::{fs::File, process::Command};
 
 use tokio::io::AsyncReadExt;
 
 #[cfg(feature = "enterprise")]
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 
 #[cfg(feature = "enterprise")]
 use windmill_common::variables;
@@ -60,11 +47,13 @@ pub const EMPTY_FILE: &str = "<empty>";
 
 lazy_static::lazy_static! {
     pub static ref TRUSTED_DEP: Regex = Regex::new(r"//\s?trustedDependencies:(.*)\n").unwrap();
+
 }
 
 pub async fn gen_lockfile(
     logs: &mut String,
     mem_peak: &mut i32,
+    canceled_by: &mut Option<CanceledBy>,
     job_id: &Uuid,
     w_id: &str,
     db: &sqlx::Pool<sqlx::Postgres>,
@@ -90,9 +79,12 @@ pub async fn gen_lockfile(
                 .replace("BASE_INTERNAL_URL", base_internal_url)
                 .replace("TOKEN", token)
                 .replace("CURRENT_PATH", script_path)
+                .replace("RAW_GET_ENDPOINT", "raw")
         ),
     )
     .await?;
+
+    gen_bunfig(job_dir).await?;
 
     let common_bun_proc_envs: HashMap<String, String> =
         get_common_bun_proc_envs(&base_internal_url).await;
@@ -112,6 +104,7 @@ pub async fn gen_lockfile(
         db,
         logs,
         mem_peak,
+        canceled_by,
         child_process,
         false,
         worker_name,
@@ -156,6 +149,7 @@ pub async fn gen_lockfile(
     install_lockfile(
         logs,
         mem_peak,
+        canceled_by,
         job_id,
         w_id,
         db,
@@ -189,9 +183,46 @@ pub async fn gen_lockfile(
     }
 }
 
+async fn gen_bunfig(job_dir: &str) -> Result<()> {
+    let registry = NPM_CONFIG_REGISTRY.read().await.clone();
+    let bunfig_install_scopes = BUNFIG_INSTALL_SCOPES.read().await.clone();
+    Ok(if registry.is_some() || bunfig_install_scopes.is_some() {
+        let (url, token_opt) = if let Some(ref s) = registry {
+            let url = s.trim();
+            if url.is_empty() {
+                ("https://registry.npmjs.org/".to_string(), None)
+            } else {
+                parse_npm_config(s)
+            }
+        } else {
+            ("https://registry.npmjs.org/".to_string(), None)
+        };
+        let registry_toml_string = if let Some(token) = token_opt {
+            format!("{{ url = \"{url}\", token = \"{token}\" }}")
+        } else {
+            format!("\"{url}\"")
+        };
+        let bunfig_toml = format!(
+            r#"
+[install]
+registry = {}
+
+{}
+"#,
+            registry_toml_string,
+            bunfig_install_scopes
+                .map(|x| format!("[install.scopes]\n{x}"))
+                .unwrap_or("".to_string())
+        );
+        tracing::debug!("Writing following bunfig.toml: {bunfig_toml}");
+        let _ = write_file(&job_dir, "bunfig.toml", &bunfig_toml).await?;
+    })
+}
+
 pub async fn install_lockfile(
     logs: &mut String,
     mem_peak: &mut i32,
+    canceled_by: &mut Option<CanceledBy>,
     job_id: &Uuid,
     w_id: &str,
     db: &sqlx::Pool<sqlx::Postgres>,
@@ -209,11 +240,13 @@ pub async fn install_lockfile(
         .stderr(Stdio::piped());
     let child_process = start_child_process(child_cmd, &*BUN_PATH).await?;
 
+    gen_bunfig(job_dir).await?;
     handle_child(
         job_id,
         db,
         logs,
         mem_peak,
+        canceled_by,
         child_process,
         false,
         worker_name,
@@ -248,6 +281,7 @@ pub async fn handle_bun_job(
     requirements_o: Option<String>,
     logs: &mut String,
     mem_peak: &mut i32,
+    canceled_by: &mut Option<CanceledBy>,
     job: &QueuedJob,
     db: &sqlx::Pool<sqlx::Postgres>,
     client: &AuthedClientBackgroundTask,
@@ -262,6 +296,15 @@ pub async fn handle_bun_job(
 
     let common_bun_proc_envs: HashMap<String, String> =
         get_common_bun_proc_envs(&base_internal_url).await;
+
+    let nodejs_mode: bool = inner_content.starts_with("//nodejs");
+
+    #[cfg(not(feature = "enterprise"))]
+    if nodejs_mode {
+        return Err(error::Error::ExecutionErr(
+            "Nodejs mode is an EE feature".to_string(),
+        ));
+    }
 
     if let Some(reqs) = requirements_o {
         let splitted = reqs.split(BUN_LOCKB_SPLIT).collect::<Vec<&str>>();
@@ -291,6 +334,7 @@ pub async fn handle_bun_job(
             install_lockfile(
                 logs,
                 mem_peak,
+                canceled_by,
                 &job.id,
                 &job.workspace_id,
                 db,
@@ -299,45 +343,41 @@ pub async fn handle_bun_job(
                 common_bun_proc_envs.clone(),
             )
             .await?;
-            if !has_trusted_deps {
-                remove_dir_all(format!("{}/node_modules", job_dir)).await?;
-            }
         }
     } else {
         // TODO: remove once bun implement a reasonable set of trusted deps
         let trusted_deps = get_trusted_deps(inner_content);
-        let empty_trusted_deps = trusted_deps.len() == 0;
-        let has_custom_config_registry = common_bun_proc_envs.contains_key("NPM_CONFIG_REGISTRY");
-        if !*DISABLE_NSJAIL || !empty_trusted_deps || has_custom_config_registry {
-            logs.push_str("\n\n--- BUN INSTALL ---\n");
-            set_logs(&logs, &job.id, &db).await;
-            let _ = gen_lockfile(
-                logs,
-                mem_peak,
-                &job.id,
-                &job.workspace_id,
-                db,
-                &client.get_token().await,
-                &job.script_path(),
-                job_dir,
-                base_internal_url,
-                worker_name,
-                false,
-                trusted_deps,
-            )
-            .await?;
-        }
 
-        if empty_trusted_deps && !has_custom_config_registry {
-            let node_modules_path = format!("{}/node_modules", job_dir);
-            let node_modules_exists = tokio::fs::metadata(&node_modules_path).await.is_ok();
-            if node_modules_exists {
-                remove_dir_all(&node_modules_path).await?;
-            }
-        }
+        // if !*DISABLE_NSJAIL || !empty_trusted_deps || has_custom_config_registry {
+        logs.push_str("\n\n--- BUN INSTALL ---\n");
+        set_logs(&logs, &job.id, &db).await;
+        let _ = gen_lockfile(
+            logs,
+            mem_peak,
+            canceled_by,
+            &job.id,
+            &job.workspace_id,
+            db,
+            &client.get_token().await,
+            &job.script_path(),
+            job_dir,
+            base_internal_url,
+            worker_name,
+            false,
+            trusted_deps,
+        )
+        .await?;
+        // }
     }
 
-    logs.push_str("\n\n--- BUN CODE EXECUTION ---\n");
+    let main_code = remove_pinned_imports(inner_content)?;
+    let _ = write_file(job_dir, "main.ts", &main_code).await?;
+
+    if nodejs_mode {
+        logs.push_str("\n\n--- NODE CODE EXECUTION ---\n");
+    } else {
+        logs.push_str("\n\n--- BUN CODE EXECUTION ---\n");
+    }
 
     let logs_f = async {
         set_logs(&logs, &job.id, &db).await;
@@ -384,7 +424,12 @@ async function run() {{
     process.exit(0);
 }}
 run().catch(async (e) => {{
-    await fs.writeFile("result.json", JSON.stringify({{ message: e.message, name: e.name, stack: e.stack }}));
+    let err = {{ message: e.message, name: e.name, stack: e.stack }};
+    let step_id = process.env.WM_FLOW_STEP_ID;
+    if (step_id) {{
+        err["step_id"] = step_id;
+    }}
+    await fs.writeFile("result.json", JSON.stringify(err));
     process.exit(1);
 }});
     "#,
@@ -407,27 +452,66 @@ run().catch(async (e) => {{
         Ok(reserved_variables) as error::Result<HashMap<String, String>>
     };
 
-    let write_loader_f = async {
-        write_file(
-            &job_dir,
-            "loader.bun.ts",
-            &format!(
-                r#"
+    let loader = RELATIVE_BUN_LOADER
+        .replace("W_ID", &job.workspace_id)
+        .replace("BASE_INTERNAL_URL", base_internal_url)
+        .replace("TOKEN", &client.get_token().await)
+        .replace("CURRENT_PATH", job.script_path())
+        .replace("RAW_GET_ENDPOINT", "raw_unpinned");
+    let write_loader_f = async move {
+        if nodejs_mode {
+            write_file(
+                &job_dir,
+                "node_builder.ts",
+                &format!(
+                    r#"
+{}
+
+import {{ readdir }} from "node:fs/promises";
+
+let fileNames = []
+try {{
+    fileNames = await readdir("{job_dir}/node_modules")
+}} catch (e) {{
+
+}}
+
+const bo = await Bun.build({{
+    entrypoints: ["{job_dir}/wrapper.ts"],
+    outdir: "./",
+    target: "node",
+    plugins: [p],
+    external: fileNames,
+  }});
+
+if (!bo.success) {{
+    bo.logs.forEach((l) => console.log(l));
+    process.exit(1);
+}}
+"#,
+                    loader
+                ),
+            )
+            .await?;
+            Ok(()) as error::Result<()>
+        } else {
+            write_file(
+                &job_dir,
+                "loader.bun.ts",
+                &format!(
+                    r#"
 import {{ plugin }} from "bun";
 
 {}
 
 plugin(p)
 "#,
-                RELATIVE_BUN_LOADER
-                    .replace("W_ID", &job.workspace_id)
-                    .replace("BASE_INTERNAL_URL", base_internal_url)
-                    .replace("TOKEN", &client.get_token().await)
-                    .replace("CURRENT_PATH", job.script_path())
-            ),
-        )
-        .await?;
-        Ok(()) as error::Result<()>
+                    loader
+                ),
+            )
+            .await?;
+            Ok(()) as error::Result<()>
+        }
     };
 
     let (reserved_variables, _, _, _) = tokio::try_join!(
@@ -437,12 +521,47 @@ plugin(p)
         write_loader_f
     )?;
 
+    if nodejs_mode {
+        let mut child = Command::new(&*BUN_PATH);
+        child
+            .current_dir(job_dir)
+            .env_clear()
+            .envs(common_bun_proc_envs.clone())
+            .env("PATH", PATH_ENV.as_str())
+            .args(vec!["run", "node_builder.ts"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let child_process = start_child_process(child, &*BUN_PATH).await?;
+        handle_child(
+            &job.id,
+            db,
+            logs,
+            mem_peak,
+            canceled_by,
+            child_process,
+            false,
+            worker_name,
+            &job.workspace_id,
+            "bun build",
+            job.timeout,
+            false,
+        )
+        .await?;
+        tokio::fs::rename(
+            format!("{job_dir}/wrapper.js"),
+            format!("{job_dir}/wrapper.mjs"),
+        )
+        .await
+        .map_err(|e| error::Error::InternalErr(format!("Could not move wrapper to mjs: {e}")))?;
+    }
+
     //do not cache local dependencies
     let child = if !*DISABLE_NSJAIL {
         let _ = write_file(
             job_dir,
             "run.config.proto",
             &NSJAIL_CONFIG_RUN_BUN_CONTENT
+                .replace("{LANG}", if nodejs_mode { "nodejs" } else { "bun" })
                 .replace("{JOB_DIR}", job_dir)
                 .replace("{CACHE_DIR}", BUN_CACHE_DIR)
                 .replace("{CLONE_NEWUSER}", &(!*DISABLE_NUSER).to_string())
@@ -451,14 +570,16 @@ plugin(p)
         .await?;
 
         let mut nsjail_cmd = Command::new(NSJAIL_PATH.as_str());
-        nsjail_cmd
-            .current_dir(job_dir)
-            .env_clear()
-            .envs(envs)
-            .envs(reserved_variables)
-            .envs(common_bun_proc_envs)
-            .env("PATH", PATH_ENV.as_str())
-            .args(vec![
+        let args = if nodejs_mode {
+            vec![
+                "--config",
+                "run.config.proto",
+                "--",
+                &NODE_PATH,
+                "/tmp/nodejs/wrapper.mjs",
+            ]
+        } else {
+            vec![
                 "--config",
                 "run.config.proto",
                 "--",
@@ -469,31 +590,57 @@ plugin(p)
                 "-r",
                 "/tmp/bun/loader.bun.ts",
                 "/tmp/bun/wrapper.ts",
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        start_child_process(nsjail_cmd, NSJAIL_PATH.as_str()).await?
-    } else {
-        let script_path = format!("{job_dir}/wrapper.ts");
-        let args = vec![
-            "run",
-            "-i",
-            "--prefer-offline",
-            "-r",
-            "./loader.bun.ts",
-            &script_path,
-        ];
-        let mut bun_cmd = Command::new(&*BUN_PATH);
-        bun_cmd
+            ]
+        };
+        nsjail_cmd
             .current_dir(job_dir)
             .env_clear()
             .envs(envs)
             .envs(reserved_variables)
             .envs(common_bun_proc_envs)
+            .env("PATH", PATH_ENV.as_str())
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        start_child_process(bun_cmd, &*BUN_PATH).await?
+        start_child_process(nsjail_cmd, NSJAIL_PATH.as_str()).await?
+    } else {
+        let cmd = if nodejs_mode {
+            let script_path = format!("{job_dir}/wrapper.mjs");
+
+            let mut bun_cmd = Command::new(&*NODE_PATH);
+            bun_cmd
+                .current_dir(job_dir)
+                .env_clear()
+                .envs(envs)
+                .envs(reserved_variables)
+                .envs(common_bun_proc_envs)
+                .args(vec![&script_path])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            bun_cmd
+        } else {
+            let script_path = format!("{job_dir}/wrapper.ts");
+
+            let mut bun_cmd = Command::new(&*BUN_PATH);
+            bun_cmd
+                .current_dir(job_dir)
+                .env_clear()
+                .envs(envs)
+                .envs(reserved_variables)
+                .envs(common_bun_proc_envs)
+                .args(vec![
+                    "run",
+                    "-i",
+                    "--prefer-offline",
+                    "-r",
+                    "./loader.bun.ts",
+                    &script_path,
+                ])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            bun_cmd
+        };
+        start_child_process(cmd, &*BUN_PATH).await?
     };
 
     handle_child(
@@ -501,6 +648,7 @@ plugin(p)
         db,
         logs,
         mem_peak,
+        canceled_by,
         child,
         false,
         worker_name,
@@ -514,7 +662,7 @@ plugin(p)
 }
 
 pub async fn get_common_bun_proc_envs(base_internal_url: &str) -> HashMap<String, String> {
-    let mut bun_envs: HashMap<String, String> = HashMap::from([
+    let bun_envs: HashMap<String, String> = HashMap::from([
         (String::from("PATH"), PATH_ENV.clone()),
         (String::from("HOME"), HOME_ENV.clone()),
         (String::from("TZ"), TZ_ENV.clone()),
@@ -531,13 +679,11 @@ pub async fn get_common_bun_proc_envs(base_internal_url: &str) -> HashMap<String
             BUN_CACHE_DIR.to_string(),
         ),
     ]);
-
-    if let Some(ref s) = NPM_CONFIG_REGISTRY.read().await.clone() {
-        bun_envs.insert(String::from("NPM_CONFIG_REGISTRY"), s.clone());
-    }
     return bun_envs;
 }
 
+#[cfg(feature = "enterprise")]
+use crate::{dedicated_worker::handle_dedicated_process, JobCompletedSender};
 #[cfg(feature = "enterprise")]
 use std::sync::Arc;
 
@@ -553,16 +699,13 @@ pub async fn start_worker(
     w_id: &str,
     script_path: &str,
     token: &str,
-    job_completed_tx: Sender<JobCompleted>,
-    mut jobs_rx: Receiver<Arc<QueuedJob>>,
-    mut killpill_rx: tokio::sync::broadcast::Receiver<()>,
+    job_completed_tx: JobCompletedSender,
+    jobs_rx: Receiver<Arc<QueuedJob>>,
+    killpill_rx: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<()> {
-    use std::task::Poll;
-
-    use futures::{future, Future};
-
     let mut logs = "".to_string();
     let mut mem_peak: i32 = 0;
+    let mut canceled_by: Option<CanceledBy> = None;
     let _ = write_file(job_dir, "main.ts", inner_content).await?;
     let common_bun_proc_envs: HashMap<String, String> =
         get_common_bun_proc_envs(&base_internal_url).await;
@@ -578,48 +721,57 @@ pub async fn start_worker(
         None,
         None,
         None,
+        None,
+        None,
     )
-    .await
-    .to_vec();
-    let context_envs = build_envs_map(context);
+    .await;
+    let context_envs = build_envs_map(context.to_vec()).await;
     if let Some(reqs) = requirements_o {
         let splitted = reqs.split(BUN_LOCKB_SPLIT).collect::<Vec<&str>>();
         if splitted.len() != 2 {
             return Err(error::Error::ExecutionErr(
-                format!("Invalid requirements, expectd to find //bun.lockb split pattern in reqs. Found: |{reqs}|")
+                format!("Invalid requirements, expected to find //bun.lockb split pattern in reqs. Found: |{reqs}|")
             ));
         }
         let _ = write_file(job_dir, "package.json", &splitted[0]).await?;
         let lockb = splitted[1];
         if lockb != EMPTY_FILE {
-            let _ = write_file_binary(
+            let has_trusted_deps = &splitted[0].contains("trustedDependencies");
+
+            if !has_trusted_deps {
+                let _ = write_file_binary(
+                    job_dir,
+                    "bun.lockb",
+                    &base64::engine::general_purpose::STANDARD
+                        .decode(&splitted[1])
+                        .map_err(|_| {
+                            error::Error::InternalErr("Could not decode bun.lockb".to_string())
+                        })?,
+                )
+                .await?;
+            }
+
+            install_lockfile(
+                &mut logs,
+                &mut mem_peak,
+                &mut canceled_by,
+                &Uuid::nil(),
+                &w_id,
+                db,
                 job_dir,
-                "bun.lockb",
-                &base64::engine::general_purpose::STANDARD
-                    .decode(&splitted[1])
-                    .map_err(|_| {
-                        error::Error::InternalErr("Could not decode bun.lockb".to_string())
-                    })?,
+                worker_name,
+                common_bun_proc_envs.clone(),
             )
             .await?;
+            tracing::info!("dedicated worker requirements installed: {reqs}");
         }
-        install_lockfile(
-            &mut logs,
-            &mut mem_peak,
-            &Uuid::nil(),
-            &w_id,
-            db,
-            job_dir,
-            worker_name,
-            common_bun_proc_envs.clone(),
-        )
-        .await?;
     } else if !*DISABLE_NSJAIL {
         let trusted_deps = get_trusted_deps(inner_content);
         logs.push_str("\n\n--- BUN INSTALL ---\n");
         let _ = gen_lockfile(
             &mut logs,
             &mut mem_peak,
+            &mut canceled_by,
             &Uuid::nil(),
             &w_id,
             db,
@@ -633,6 +785,9 @@ pub async fn start_worker(
         )
         .await?;
     }
+
+    let main_code = remove_pinned_imports(inner_content)?;
+    let _ = write_file(job_dir, "main.ts", &main_code).await?;
 
     {
         // let mut start = Instant::now();
@@ -664,14 +819,12 @@ BigInt.prototype.toJSON = function () {{
 {dates}
 
 let stdout = Bun.stdout.writer();
-// let stdout = Bun.file("output.txt").writer();
 stdout.write('start\n'); 
 
 for await (const chunk of Bun.stdin.stream()) {{
     const lines = Buffer.from(chunk).toString();
     let exit = false;
     for (const line of lines.trim().split("\n")) {{
-        // stdout.write('s: ' + line + 'EE\n'); 
         if (line === "end") {{
             exit = true;
             break;
@@ -679,9 +832,9 @@ for await (const chunk of Bun.stdin.stream()) {{
         try {{
             let {{ {spread} }} = JSON.parse(line) 
             let res: any = await main(...[ {spread} ]);
-            stdout.write(JSON.stringify(res ?? null, (key, value) => typeof value === 'undefined' ? null : value) + '\n');
+            stdout.write("wm_res[success]:" + JSON.stringify(res ?? null, (key, value) => typeof value === 'undefined' ? null : value) + '\n');
         }} catch (e) {{
-            stdout.write(JSON.stringify({{ error: {{ message: e.message, name: e.name, stack: e.stack, line: line }}}}) + '\n');
+            stdout.write("wm_res[error]:" + JSON.stringify({{ message: e.message, name: e.name, stack: e.stack, line: line }}) + '\n');
         }}
         stdout.flush();
     }}
@@ -693,21 +846,6 @@ for await (const chunk of Bun.stdin.stream()) {{
         );
         write_file(job_dir, "wrapper.ts", &wrapper_content).await?;
     }
-
-    let reserved_variables = windmill_common::variables::get_reserved_variables(
-        w_id,
-        token,
-        "dedicated_worker",
-        "dedicated_worker",
-        Uuid::nil().to_string().as_str(),
-        "dedicted_worker",
-        Some(script_path.to_string()),
-        None,
-        None,
-        None,
-        None,
-    )
-    .await;
 
     let _ = write_file(
         &job_dir,
@@ -725,140 +863,31 @@ plugin(p)
                 .replace("BASE_INTERNAL_URL", base_internal_url)
                 .replace("TOKEN", token)
                 .replace("CURRENT_PATH", script_path)
+                .replace("RAW_GET_ENDPOINT", "raw_unpinned")
         ),
     )
     .await?;
 
-    //do not cache local dependencies
-    let mut child = {
-        let script_path = format!("{job_dir}/wrapper.ts");
-        let args = vec![
+    handle_dedicated_process(
+        &*BUN_PATH,
+        job_dir,
+        context_envs,
+        envs,
+        context,
+        common_bun_proc_envs,
+        vec![
             "run",
             "-i",
             "--prefer-offline",
             "-r",
             "./loader.bun.ts",
-            &script_path,
-        ];
-        let mut bun_cmd = Command::new(&*BUN_PATH);
-        bun_cmd
-            .current_dir(job_dir)
-            .env_clear()
-            .envs(context_envs)
-            .envs(envs)
-            .envs(
-                reserved_variables
-                    .iter()
-                    .map(|x| (x.name.clone(), x.value.clone()))
-                    .collect::<Vec<_>>(),
-            )
-            .envs(common_bun_proc_envs)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        start_child_process(bun_cmd, &*BUN_PATH).await?
-    };
-
-    let stdout = child
-        .stdout
-        .take()
-        .expect("child did not have a handle to stdout");
-
-    let mut reader = BufReader::new(stdout).lines();
-
-    let mut stdin = child
-        .stdin
-        .take()
-        .expect("child did not have a handle to stdin");
-
-    // Ensure the child process is spawned in the runtime so it can
-    // make progress on its own while we await for any output.
-    let child = tokio::spawn(async move {
-        let status = child
-            .wait()
-            .await
-            .expect("child process encountered an error");
-
-        println!("child status was: {}", status);
-    });
-
-    let mut jobs = VecDeque::with_capacity(MAX_BUFFERED_DEDICATED_JOBS);
-    // let mut i = 0;
-    // let mut j = 0;
-    let mut alive = true;
-
-    fn conditional_polling<T>(
-        fut: impl Future<Output = T>,
-        predicate: bool,
-    ) -> impl Future<Output = T> {
-        let mut fut = Box::pin(fut);
-        future::poll_fn(move |cx| {
-            if predicate {
-                fut.as_mut().poll(cx)
-            } else {
-                Poll::Pending
-            }
-        })
-    }
-
-    loop {
-        tokio::select! {
-            biased;
-            _ = killpill_rx.recv(), if alive => {
-                println!("received killpill for dedicated worker");
-                alive = false;
-                if let Err(e) = write_stdin(&mut stdin, "end").await {
-                    tracing::info!("Could not write end message to stdin: {e:?}")
-                }
-            },
-            line = reader.next_line() => {
-                // j += 1;
-
-                if let Some(line) = line.expect("line is ok") {
-                    if line == "start" {
-                        tracing::info!("dedicated worker process started");
-                        continue;
-                    }
-                    tracing::debug!("processed job");
-
-                    let result = serde_json::from_str(&line).expect("json is ok");
-                    let job: Arc<QueuedJob> = jobs.pop_front().expect("pop");
-                    job_completed_tx.send(JobCompleted { job , result, logs: "".to_string(), mem_peak: 0, success: true, cached_res_path: None, token: token.to_string() }).await.unwrap();
-                } else {
-                    tracing::info!("dedicated worker process exited");
-                    break;
-                }
-            },
-            job = conditional_polling(jobs_rx.recv(), alive && jobs.len() < MAX_BUFFERED_DEDICATED_JOBS) => {
-                // i += 1;
-                if let Some(job) = job {
-                    tracing::debug!("received job");
-                    jobs.push_back(job.clone());
-                    // write_stdin(&mut stdin, &serde_json::to_string(&job.args.unwrap_or_else(|| serde_json::json!({"x": job.id}))).expect("serialize")).await?;
-                    write_stdin(&mut stdin, &serde_json::to_string(&job.args).expect("serialize")).await?;
-                    stdin.flush().await.context("stdin flush")?;
-                } else {
-                    tracing::debug!("job channel closed");
-                    alive = false;
-                    if let Err(e) = write_stdin(&mut stdin, "end").await {
-                        tracing::error!("Could not write end message to stdin: {e:?}")
-                    }
-                }
-            }
-        }
-    }
-
-    child
-        .await
-        .map_err(|e| anyhow::anyhow!("child process encountered an error: {e}"))?;
-    tracing::info!("dedicated worker child process exited successfully");
-    Ok(())
-}
-
-#[cfg(feature = "enterprise")]
-async fn write_stdin(stdin: &mut tokio::process::ChildStdin, s: &str) -> error::Result<()> {
-    let _ = &stdin.write_all(format!("{s}\n").as_bytes()).await?;
-    stdin.flush().await.context("stdin flush")?;
-    Ok(())
+            &format!("{job_dir}/wrapper.ts"),
+        ],
+        killpill_rx,
+        job_completed_tx,
+        token,
+        jobs_rx,
+        worker_name,
+    )
+    .await
 }

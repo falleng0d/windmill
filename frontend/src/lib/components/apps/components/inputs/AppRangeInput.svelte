@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte'
+	import { getContext, onDestroy } from 'svelte'
 	import RangeSlider from 'svelte-range-slider-pips'
 	import { twMerge } from 'tailwind-merge'
 	import { initConfig, initOutput } from '../../editor/appUtils'
@@ -53,10 +53,14 @@
 		}
 	}
 
+	onDestroy(() => {
+		listInputs?.remove(id)
+	})
+
 	$: {
 		outputs?.result.set(values)
 		if (iterContext && listInputs) {
-			listInputs(id, values)
+			listInputs.set(id, values)
 		}
 	}
 
@@ -97,7 +101,7 @@
 	<div class="flex flex-col w-full">
 		<div class="flex items-center w-full gap-1 px-1">
 			<span
-				class={twMerge(css?.limits?.class ?? '', 'wm-slider-limits')}
+				class={twMerge(css?.limits?.class ?? '', 'font-mono wm-slider-limits')}
 				style={css?.limits?.style ?? ''}
 			>
 				{+(resolvedConfig.min ?? 0)}
@@ -109,6 +113,7 @@
 				on:pointerdown|stopPropagation
 			>
 				<RangeSlider
+					springValues={{ stiffness: 1, damping: 1 }}
 					bind:slider
 					bind:values
 					step={resolvedConfig.step}
@@ -120,7 +125,7 @@
 				<!-- <RangeSlider {step} range min={min ?? 0} max={max ?? 1} bind:values /> -->
 			</div>
 			<span
-				class={twMerge(css?.limits?.class ?? '', 'wm-slider-limits')}
+				class={twMerge(css?.limits?.class ?? '', 'font-mono wm-slider-limits')}
 				style={css?.limits?.style ?? ''}
 			>
 				{+(resolvedConfig.max ?? 1)}
@@ -129,7 +134,7 @@
 		<div class="flex justify-between px-1">
 			<span
 				class={twMerge(
-					'text-center text-sm font-medium bg-blue-100 text-blue-800 rounded px-2.5 py-0.5',
+					'font-mono text-center text-sm font-medium bg-blue-100 text-blue-800 rounded px-2.5 py-0.5',
 					css?.values?.class ?? '',
 					'wm-slider-value'
 				)}
@@ -139,7 +144,7 @@
 			</span>
 			<span
 				class={twMerge(
-					'text-center text-sm font-medium bg-blue-100 text-blue-800 rounded px-2.5 py-0.5',
+					'font-mono text-center text-sm font-medium bg-blue-100 text-blue-800 rounded px-2.5 py-0.5',
 					css?.values?.class ?? '',
 					'wm-slider-value'
 				)}

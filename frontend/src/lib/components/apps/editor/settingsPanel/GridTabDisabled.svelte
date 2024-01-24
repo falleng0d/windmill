@@ -7,7 +7,7 @@
 	export let id: string
 	export let field: RichConfiguration
 
-	let disablable = !(field?.type === 'static' && field?.value === false)
+	let disablable = field && !(field?.type === 'static' && field?.value === false)
 </script>
 
 <Toggle
@@ -19,9 +19,10 @@
 	on:change={() => {
 		if (disablable) {
 			field = {
-				type: 'eval',
+				type: 'evalv2',
 				expr: 'false',
-				fieldType: 'boolean'
+				fieldType: 'boolean',
+				connections: []
 			}
 		} else {
 			field = {

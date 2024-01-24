@@ -4,7 +4,7 @@ export type ComponentFunction = {
 	title: string
 	description: string
 	example: string
-	documentation: string
+	documentation?: string
 }
 
 const setTab = {
@@ -50,11 +50,36 @@ const open = {
 	documentation: 'https://www.windmill.dev/docs/apps/app-runnable-panel#open'
 }
 
+const clearFiles = {
+	title: 'clearFiles',
+	description: 'Clear the files of a file input component.',
+	example: 'clearFiles(id: string)',
+	documentation: 'https://www.windmill.dev/docs/apps/app-runnable-panel#clearFiles'
+}
+
 const close = {
 	title: 'close',
 	description: 'Use the close function to close a modal or a drawer.',
 	example: 'close(id: string)',
 	documentation: 'https://www.windmill.dev/docs/apps/app-runnable-panel#close'
+}
+
+const validate = {
+	title: 'validate',
+	description: 'Validate a specific field of a form',
+	example: 'validate(id: string, key: string)'
+}
+
+const invalidate = {
+	title: 'invalidate',
+	description: 'Invalidate a specific field of a form',
+	example: 'invalidate(id: string, key: string, error: string)'
+}
+
+const validateAll = {
+	title: 'validateAll',
+	description: 'Validate all fields of a form',
+	example: 'validateAll(id: string, key: string)'
 }
 
 export function getComponentControl(type: keyof typeof components): Array<ComponentFunction> {
@@ -66,7 +91,6 @@ export function getComponentControl(type: keyof typeof components): Array<Compon
 		case 'selecttabcomponent':
 			return [setTab, setValue]
 		case 'conditionalwrapper':
-			return [setTab]
 		case 'steppercomponent':
 			return [setTab]
 		case 'modalcomponent':
@@ -77,22 +101,26 @@ export function getComponentControl(type: keyof typeof components): Array<Compon
 			return [getAgGrid, setSelectedIndex]
 		case 'aggridcomponentee':
 			return [getAgGrid, setSelectedIndex]
+		case 's3fileinputcomponent':
+			return [clearFiles]
 		case 'displaycomponent':
 		case 'dateinputcomponent':
 		case 'textinputcomponent':
 		case 'numberinputcomponent':
 		case 'currencycomponent':
 		case 'checkboxcomponent':
-		case 'formcomponent':
 		case 'rangecomponent':
 		case 'multiselectcomponent':
 		case 'selectcomponent':
 		case 'slidercomponent':
-		case 'schemaformcomponent':
 		case 'quillcomponent':
 		case 'textcomponent':
 		case 'textareainputcomponent':
 			return [setValue]
+		case 'formcomponent':
+		case 'schemaformcomponent':
+		case 'formbuttoncomponent':
+			return [setValue, validate, validateAll, invalidate]
 		case 'tablecomponent':
 			return [setSelectedIndex]
 		default:

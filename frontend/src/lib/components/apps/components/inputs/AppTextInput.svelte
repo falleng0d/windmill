@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte'
+	import { getContext, onDestroy } from 'svelte'
 	import { twMerge } from 'tailwind-merge'
 	import { initConfig, initOutput, selectId } from '../../editor/appUtils'
 	import type {
@@ -15,6 +15,7 @@
 	import { components } from '../../editor/component'
 	import ResolveConfig from '../helpers/ResolveConfig.svelte'
 	import ResolveStyle from '../helpers/ResolveStyle.svelte'
+	import { loadIcon } from '../icon'
 
 	export let id: string
 	export let configuration: RichConfigurations
@@ -45,6 +46,10 @@
 		result: ''
 	})
 
+	onDestroy(() => {
+		listInputs?.remove(id)
+	})
+
 	$componentControl[id] = {
 		setValue(nvalue: string) {
 			value = nvalue
@@ -57,7 +62,7 @@
 		let val = value ?? ''
 		outputs?.result.set(val)
 		if (iterContext && listInputs) {
-			listInputs(id, val)
+			listInputs.set(id, val)
 		}
 	}
 
@@ -66,6 +71,31 @@
 	}
 
 	let css = initCss($app.css?.[appCssKey], customCss)
+
+	$: classInput = twMerge(
+		'windmillapp w-full  py-1.5 text-sm focus:ring-indigo-100 px-2',
+		css?.input?.class ?? '',
+		resolvedConfig.disabled ? 'placeholder:text-gray-400 dark:placeholder:text-gray-600' : '',
+		'wm-text-input'
+	)
+
+	let beforeIconComponent: any
+	let afterIconComponent: any
+
+	$: resolvedConfig.beforeIcon && handleBeforeIcon()
+	$: resolvedConfig.afterIcon && handleAfterIcon()
+
+	async function handleBeforeIcon() {
+		if (resolvedConfig.beforeIcon) {
+			beforeIconComponent = await loadIcon(resolvedConfig.beforeIcon)
+		}
+	}
+
+	async function handleAfterIcon() {
+		if (resolvedConfig.afterIcon) {
+			afterIconComponent = await loadIcon(resolvedConfig.afterIcon)
+		}
+	}
 </script>
 
 {#each Object.keys(components['textinputcomponent'].initialData.configuration) as key (key)}
@@ -92,9 +122,12 @@
 	{#if inputType === 'textarea'}
 		<textarea
 			class={twMerge(
-				'windmillapp w-full h-full py-1.5 text-sm focus:ring-indigo-100 px-2 ',
-				css?.input?.class ?? '',
-				'wm-text-input'
+				classInput,
+
+				beforeIconComponent && 'pl-8',
+				afterIconComponent && 'pr-8',
+
+				'h-full'
 			)}
 			style="resize:none; {css?.input?.style ?? ''}"
 			on:pointerdown|stopPropagation={(e) =>
@@ -102,55 +135,61 @@
 			on:keydown|stopPropagation
 			bind:value
 			placeholder={resolvedConfig.placeholder}
+			disabled={resolvedConfig.disabled}
 		/>
 	{:else}
 		<AlignWrapper {render} {verticalAlignment}>
-			{#if inputType === 'password'}
-				<input
-					class={twMerge(
-						'windmillapp w-full py-1.5 text-sm focus:ring-indigo-100 px-2 ',
-						css?.input?.class ?? '',
-						'wm-text-input'
-					)}
-					style={css?.input?.style ?? ''}
-					on:pointerdown|stopPropagation={(e) =>
-						!$connectingInput.opened && selectId(e, id, selectedComponent, $app)}
-					on:keydown|stopPropagation
-					type="password"
-					bind:value
-					placeholder={resolvedConfig.placeholder}
-				/>
-			{:else if inputType === 'text'}
-				<input
-					class={twMerge(
-						'windmillapp w-full py-1.5 text-sm focus:ring-indigo-100 px-2 ',
-						css?.input?.class ?? '',
-						'wm-text-input'
-					)}
-					style={css?.input?.style ?? ''}
-					on:pointerdown|stopPropagation={(e) =>
-						!$connectingInput.opened && selectId(e, id, selectedComponent, $app)}
-					on:keydown|stopPropagation
-					type="text"
-					bind:value
-					placeholder={resolvedConfig.placeholder}
-				/>
-			{:else if inputType === 'email'}
-				<input
-					class={twMerge(
-						'windmillapp w-full py-1.5 text-sm focus:ring-indigo-100 px-2 ',
-						css?.input?.class ?? '',
-						'wm-text-input'
-					)}
-					style={css?.input?.style ?? ''}
-					on:pointerdown|stopPropagation={(e) =>
-						!$connectingInput.opened && selectId(e, id, selectedComponent, $app)}
-					on:keydown|stopPropagation
-					type="email"
-					bind:value
-					placeholder={resolvedConfig.placeholder}
-				/>
-			{/if}
+			<div class="relative w-full">
+				<div class="absolute top-1/2 -translate-y-1/2 left-2">
+					{#if resolvedConfig.beforeIcon && beforeIconComponent}
+						<svelte:component this={beforeIconComponent} size={14} />
+					{/if}
+				</div>
+
+				{#if inputType === 'password'}
+					<input
+						class={twMerge(classInput, beforeIconComponent && 'pl-8', afterIconComponent && 'pr-8')}
+						style={css?.input?.style ?? ''}
+						on:pointerdown|stopPropagation={(e) =>
+							!$connectingInput.opened && selectId(e, id, selectedComponent, $app)}
+						on:keydown|stopPropagation
+						type="password"
+						bind:value
+						placeholder={resolvedConfig.placeholder}
+						disabled={resolvedConfig.disabled}
+					/>
+				{:else if inputType === 'text'}
+					<input
+						class={twMerge(classInput, beforeIconComponent && 'pl-8', afterIconComponent && 'pr-8')}
+						style={css?.input?.style ?? ''}
+						on:pointerdown|stopPropagation={(e) =>
+							!$connectingInput.opened && selectId(e, id, selectedComponent, $app)}
+						on:keydown|stopPropagation
+						type="text"
+						bind:value
+						placeholder={resolvedConfig.placeholder}
+						disabled={resolvedConfig.disabled}
+					/>
+				{:else if inputType === 'email'}
+					<input
+						class={twMerge(classInput, beforeIconComponent && 'pl-8', afterIconComponent && 'pr-8')}
+						style={css?.input?.style ?? ''}
+						on:pointerdown|stopPropagation={(e) =>
+							!$connectingInput.opened && selectId(e, id, selectedComponent, $app)}
+						on:keydown|stopPropagation
+						type="email"
+						bind:value
+						placeholder={resolvedConfig.placeholder}
+						disabled={resolvedConfig.disabled}
+					/>
+				{/if}
+
+				<div class="absolute top-1/2 -translate-y-1/2 right-2">
+					{#if resolvedConfig.afterIcon && afterIconComponent}
+						<svelte:component this={afterIconComponent} size={14} />
+					{/if}
+				</div>
+			</div>
 		</AlignWrapper>
 	{/if}
 {/if}

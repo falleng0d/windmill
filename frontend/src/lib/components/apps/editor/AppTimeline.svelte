@@ -14,7 +14,10 @@
 	let debounced = debounce(() => computeItems($jobs), 30)
 	$: $jobs && $jobsById && debounced()
 
-	let items: Record<string, { started_at?: number; duration_ms?: number; id: string }[]> = {}
+	let items: Record<
+		string,
+		{ created_at?: number; started_at?: number; duration_ms?: number; id: string }[]
+	> = {}
 
 	export function reset() {
 		min = undefined
@@ -27,14 +30,17 @@
 
 		let isStillRunning = false
 
-		let nitems: Record<string, { started_at?: number; duration_ms?: number; id: string }[]> = {}
+		let nitems: Record<
+			string,
+			{ created_at?: number; started_at?: number; duration_ms?: number; id: string }[]
+		> = {}
 		jobs.forEach((k) => {
 			let v = $jobsById[k]
-			if (v.started_at) {
+			if (v.created_at) {
 				if (!nmin) {
-					nmin = v.started_at
+					nmin = v.created_at
 				} else {
-					nmin = Math.min(nmin, v.started_at)
+					nmin = Math.min(nmin, v.created_at)
 				}
 			}
 			if (v.duration_ms == undefined) {
@@ -53,17 +59,22 @@
 			if (!nitems[v.component]) {
 				nitems[v.component] = []
 			}
-			nitems[v.component].push({ started_at: v.started_at, duration_ms: v.duration_ms, id: v.job })
+			nitems[v.component].push({
+				created_at: v.created_at,
+				duration_ms: v.duration_ms,
+				started_at: v.started_at,
+				id: v.job
+			})
 		})
 
 		Object.values(nitems).forEach((v) => {
 			v.sort((x, y) => {
-				if (!x.started_at) {
+				if (!x.created_at) {
 					return -1
-				} else if (!y.started_at) {
+				} else if (!y.created_at) {
 					return 1
 				} else {
-					return x.started_at - y.started_at
+					return x.created_at - y.created_at
 				}
 			})
 		})
@@ -96,6 +107,19 @@
 {JSON.stringify(items, null, 4)}
 </pre> -->
 <div class="divide-y">
+	<div class="flex flex-row-reverse mb-2 items-center text-sm text-secondary px-2">
+		<div class="flex gap-4 items-center">
+			<div class="flex gap-2 items-center">
+				<div>Waiting for executor</div>
+				<div class="h-4 w-4 bg-gray-500" />
+			</div>
+
+			<div class="flex gap-2 items-center">
+				<div>Execution</div>
+				<div class="h-4 w-4 bg-blue-500/90" />
+			</div>
+		</div>
+	</div>
 	{#each Object.entries(items) as [k, v]}
 		<div class="px-2 py-2 grid grid-cols-12 w-full"
 			><div class="col-span-2">{k}</div>
@@ -103,14 +127,37 @@
 				>{#if min && total}
 					<div class="flex flex-col gap-2 w-full">
 						{#each v ?? [] as b}
-							<TimelineBar
-								id={b?.id}
-								{total}
-								{min}
-								started_at={b.started_at}
-								len={b?.started_at ? b?.duration_ms ?? now - b?.started_at : 0}
-								running={b?.duration_ms == undefined}
-							/>
+							{@const waitingLen = b?.created_at
+								? b.started_at
+									? b.started_at - b?.created_at
+									: b.duration_ms
+									? 0
+									: now - b?.created_at
+								: 0}
+							<div class="flex w-full">
+								<TimelineBar
+									position="left"
+									id={b?.id}
+									{total}
+									{min}
+									gray
+									started_at={b.created_at}
+									len={waitingLen < 100 ? 0 : waitingLen - 100}
+									running={b?.started_at == undefined}
+								/>
+								{#if b.started_at}
+									<TimelineBar
+										position={waitingLen < 100 ? 'center' : 'right'}
+										id={b?.id}
+										{total}
+										{min}
+										concat
+										started_at={b.started_at}
+										len={b.started_at ? b?.duration_ms ?? now - b?.started_at : 0}
+										running={b?.duration_ms == undefined}
+									/>
+								{/if}
+							</div>
 						{/each}
 					</div>
 				{/if}</div

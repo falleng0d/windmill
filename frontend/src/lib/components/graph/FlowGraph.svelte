@@ -12,7 +12,8 @@
 		type Loop,
 		type Branch,
 		type NestedNodes,
-		type GraphModuleState
+		type GraphModuleState,
+		getStateColor
 	} from '.'
 	import { defaultIfEmptyString, encodeState } from '$lib/utils'
 	import { createEventDispatcher, onMount, setContext } from 'svelte'
@@ -41,6 +42,7 @@
 	export let scroll = false
 	export let download = false
 	export let fullSize = false
+	export let disableAi = false
 
 	setContext<{ selectedId: Writable<string | undefined> }>('FlowGraphContext', { selectedId })
 
@@ -68,6 +70,7 @@
 	$: {
 		dataflow
 		moving
+		success
 		width && height && minHeight && $selectedId && flowModuleStates && renderCount
 
 		createGraph()
@@ -105,7 +108,6 @@
 					getParentIds(),
 					'Input',
 					modules,
-					'after',
 					undefined,
 					undefined,
 					0,
@@ -133,7 +135,6 @@
 					getParentIds(),
 					'Result',
 					undefined,
-					'before',
 					undefined,
 					undefined,
 					0,
@@ -159,6 +160,7 @@
 			const layered = layoutNodes(flatNodes)
 
 			nodes = layered.nodes
+
 			let hfull = Math.max(layered.height, minHeight)
 			fullWidth = layered.width
 			height = fullSize ? hfull : Math.min(hfull, maxHeight ?? window.innerHeight * 1.5)
@@ -277,24 +279,6 @@
 		return []
 	}
 
-	function getStateColor(state: FlowStatusModule.type | undefined): string {
-		const isDark = document.documentElement.classList.contains('dark')
-		switch (state) {
-			case FlowStatusModule.type.SUCCESS:
-				return isDark ? '#059669' : 'rgb(193, 255, 216)'
-			case FlowStatusModule.type.FAILURE:
-				return isDark ? '#dc2626' : 'rgb(248 113 113)'
-			case FlowStatusModule.type.IN_PROGRESS:
-				return isDark ? '#f59e0b' : 'rgb(253, 240, 176)'
-			case FlowStatusModule.type.WAITING_FOR_EVENTS:
-				return isDark ? '#db2777' : 'rgb(229, 176, 253)'
-			case FlowStatusModule.type.WAITING_FOR_EXECUTOR:
-				return isDark ? '#ea580c' : 'rgb(255, 208, 193)'
-			default:
-				return isDark ? '#2e3440' : '#fff'
-		}
-	}
-
 	function getResultColor(): string {
 		const isDark = document.documentElement.classList.contains('dark')
 
@@ -335,7 +319,8 @@
 						bgColor: getStateColor(flowModuleStates?.[mod.id]?.type),
 						annotation,
 						modules,
-						moving
+						moving,
+						disableAi
 					},
 					cb: (e: string, detail: any) => {
 						if (e == 'delete') {
@@ -380,8 +365,11 @@
 					getParentIds(parent),
 					module,
 					undefined,
-					flowModuleStates?.[module.id]?.iteration_total
-						? 'Iteration ' + flowModuleStates?.[module.id]?.iteration_total
+					flowModuleStates?.[module.id]?.iteration
+						? 'Iteration ' +
+								flowModuleStates?.[module.id]?.iteration +
+								'/' +
+								(flowModuleStates?.[module.id]?.iteration_total ?? '?')
 						: '',
 					loopDepth,
 					false,
@@ -396,12 +384,11 @@
 				getParentIds(loop.items),
 				`Do one iteration`,
 				innerModules,
-				'after',
 				undefined,
 				1000,
 				loopDepth + 1,
 				0,
-				true,
+				false,
 				undefined,
 				undefined,
 				undefined
@@ -423,7 +410,6 @@
 				getParentIds(loop.items),
 				`Collect result of each iteration`,
 				modules,
-				'after',
 				undefined,
 				1000,
 				loopDepth,
@@ -464,7 +450,6 @@
 					branchParent,
 					'No branches',
 					undefined,
-					'after',
 					undefined,
 					0,
 					loopDepth,
@@ -484,7 +469,6 @@
 					branchParent,
 					summary,
 					modules,
-					'after',
 					edgesLabel[i],
 					undefined,
 					loopDepth,
@@ -519,7 +503,6 @@
 				bitems.map((i) => getParentIds(i)).flat(),
 				branchall ? 'Collect result of each branch' : 'Result of the chosen branch',
 				modules,
-				'after',
 				undefined,
 				0,
 				loopDepth,
@@ -651,7 +634,6 @@
 		parentIds: string[],
 		label: string,
 		modules: FlowModule[] | undefined,
-		whereInsert: 'before' | 'after' | undefined,
 		edgeLabel: string | undefined,
 		offset: number | undefined,
 		loopDepth: number,
@@ -688,11 +670,11 @@
 						selected: $selectedId == label,
 						index,
 						selectable,
-						whereInsert,
 						deleteBranch,
 						id: mid,
 						moving,
-						center
+						center,
+						disableAi
 					},
 					cb: (e: string, detail: any) => {
 						if (e == 'insert') {
@@ -737,7 +719,8 @@
 						selected: $selectedId == mod.id,
 						index: 0,
 						selectable: true,
-						id: mod.id
+						id: mod.id,
+						disableAi
 					},
 					cb: (e: string, detail: any) => {
 						if (e == 'select') {
@@ -778,7 +761,11 @@
 			{#key renderCount}
 				<Svelvet
 					on:expand={() => {
-						localStorage.setItem('svelvet', encodeState({ modules, failureModule }))
+						try {
+							localStorage.setItem('svelvet', encodeState({ modules, failureModule }))
+						} catch (e) {
+							console.error('error interacting with local storage', e)
+						}
 						window.open('/view_graph', '_blank')
 					}}
 					{download}

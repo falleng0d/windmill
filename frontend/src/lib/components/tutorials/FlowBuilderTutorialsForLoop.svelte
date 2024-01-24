@@ -9,8 +9,8 @@
 		updateFlowModuleById
 	} from './utils'
 	import Tutorial from './Tutorial.svelte'
-	import { nextId } from '../flows/flowStateUtils'
 	import { updateProgress } from '$lib/tutorialUtils'
+	import { nextId } from '../flows/flowModuleNextId'
 
 	const dispatch = createEventDispatcher()
 	const { flowStore, selectedId, flowStateStore } =
@@ -40,7 +40,7 @@
 		return [
 			{
 				popover: {
-					title: 'Welcome to the Windmil Flow editor',
+					title: 'For loops tutorial',
 					description:
 						'Learn how to build our first for loop to iterate on. You can use arrow keys to navigate.'
 				}

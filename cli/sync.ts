@@ -1,10 +1,10 @@
-import { requireLogin, resolveWorkspace } from "./context.ts";
+import { fetchVersion, requireLogin, resolveWorkspace } from "./context.ts";
 import {
   colors,
   Command,
   Confirm,
   ensureDir,
-  gitignore_parser,
+  minimatch,
   JSZip,
   path,
   ScriptService,
@@ -21,6 +21,7 @@ import {
   yamlParse,
   ScheduleService,
   SEP,
+  gitignore_parser,
 } from "./deps.ts";
 import {
   getTypeStrFromPath,
@@ -32,10 +33,12 @@ import {
 } from "./types.ts";
 import { downloadZip } from "./pull.ts";
 
-import { handleScriptMetadata } from "./script.ts";
+import { handleScriptMetadata, removeExtensionToPath } from "./script.ts";
 
 import { handleFile } from "./script.ts";
 import { deepEqual } from "./utils.ts";
+import { read } from "https://deno.land/x/cbor@v1.4.1/decode.js";
+import { readConfigFile } from "./conf.ts";
 
 type DynFSElement = {
   isDirectory: boolean;
@@ -52,8 +55,12 @@ async function FSFSElement(p: string): Promise<DynFSElement> {
       path: localP.substring(p.length + 1),
       async *getChildren(): AsyncIterable<DynFSElement> {
         if (!isDir) return [];
-        for await (const e of Deno.readDir(localP)) {
-          yield _internal_element(path.join(localP, e.name), e.isDirectory);
+        try {
+          for await (const e of Deno.readDir(localP)) {
+            yield _internal_element(path.join(localP, e.name), e.isDirectory);
+          }
+        } catch (e) {
+          log.warning(`Error reading dir: ${localP}, ${e}`);
         }
       },
       // async getContentBytes(): Promise<Uint8Array> {
@@ -139,6 +146,7 @@ function ZipFSElement(zip: JSZip, useYaml: boolean): DynFSElement {
       else if (language == "mysql") ext = "my.sql";
       else if (language == "bigquery") ext = "bq.sql";
       else if (language == "snowflake") ext = "sf.sql";
+      else if (language == "mssql") ext = "ms.sql";
       else if (language == "graphql") ext = "gql";
       else if (language == "bun") ext = "bun.ts";
       else if (language == "nativets") ext = "native.ts";
@@ -298,54 +306,102 @@ type Change = Added | Deleted | Edit;
 async function elementsToMap(
   els: DynFSElement,
   ignore: (path: string, isDirectory: boolean) => boolean,
-  json: boolean
+  json: boolean,
+  skips: Skips
 ): Promise<{ [key: string]: string }> {
   const map: { [key: string]: string } = {};
   for await (const entry of readDirRecursiveWithIgnore(ignore, els)) {
     if (entry.isDirectory || entry.ignored) continue;
-    if (json && entry.path.endsWith(".yaml")) continue;
-    if (!json && entry.path.endsWith(".json")) continue;
+    const path = entry.path;
+    if (json && path.endsWith(".yaml")) continue;
+    if (!json && path.endsWith(".json")) continue;
+    const ext = json ? ".json" : ".yaml";
+    if (!skips.includeSchedules && path.endsWith(".schedule" + ext)) continue;
+    if (skips.skipResources && path.endsWith(".resource" + ext)) continue;
+    if (skips.skipVariables && path.endsWith(".variable" + ext)) continue;
+
+    if (skips.skipResources && path.endsWith(".resource" + ext)) continue;
+
     if (
-      !["json", "yaml", "go", "sh", "ts", "py", "sql"].includes(
-        entry.path.split(".").pop() ?? ""
+      !["json", "yaml", "go", "sh", "ts", "py", "sql", "gql", "ps1"].includes(
+        path.split(".").pop() ?? ""
       )
     )
       continue;
     const content = await entry.getContentText();
+
+    if (skips.skipSecrets && path.endsWith(".variable" + ext)) {
+      try {
+        let o;
+        if (json) {
+          o = JSON.parse(content);
+        } else {
+          o = yamlParse(content);
+        }
+        if (o["is_secret"]) {
+          continue;
+        }
+      } catch (e) {
+        log.warning(`Error reading variable ${path} to check for secrets`);
+      }
+    }
     map[entry.path] = content;
   }
   return map;
+}
+
+interface Skips {
+  skipVariables?: boolean | undefined;
+  skipResources?: boolean | undefined;
+  skipSecrets?: boolean | undefined;
+  includeSchedules?: boolean | undefined;
 }
 
 async function compareDynFSElement(
   els1: DynFSElement,
   els2: DynFSElement | undefined,
   ignore: (path: string, isDirectory: boolean) => boolean,
-  json: boolean
+  json: boolean,
+  skips: Skips
 ): Promise<Change[]> {
   const [m1, m2] = els2
     ? await Promise.all([
-        elementsToMap(els1, ignore, json),
-        elementsToMap(els2, ignore, json),
+        elementsToMap(els1, ignore, json, skips),
+        elementsToMap(els2, ignore, json, skips),
       ])
-    : [await elementsToMap(els1, ignore, json), {}];
+    : [await elementsToMap(els1, ignore, json, skips), {}];
 
   const changes: Change[] = [];
 
+  function parseYaml(k: string, v: string) {
+    if (k.endsWith(".script.yaml")) {
+      const o: any = yamlParse(v);
+      if (typeof o == "object" && Array.isArray(o?.["lock"])) {
+        o["lock"] = o["lock"].join("\n");
+      }
+      return o;
+    } else {
+      return yamlParse(v);
+    }
+  }
   for (const [k, v] of Object.entries(m1)) {
     if (m2[k] === undefined) {
       changes.push({ name: "added", path: k, content: v });
     } else if (
       m2[k] != v &&
       (!k.endsWith(".json") || !deepEqual(JSON.parse(v), JSON.parse(m2[k]))) &&
-      (!k.endsWith(".yaml") || !deepEqual(yamlParse(v), yamlParse(m2[k])))
+      (!k.endsWith(".yaml") || !deepEqual(parseYaml(k, v), parseYaml(k, m2[k])))
     ) {
       changes.push({ name: "edited", path: k, after: v, before: m2[k] });
     }
   }
 
   for (const [k] of Object.entries(m2)) {
-    if (m1[k] === undefined) {
+    if (
+      m1[k] === undefined &&
+      !k?.endsWith(".script.yaml") &&
+      !k?.endsWith(".script.json")
+    ) {
       changes.push({ name: "deleted", path: k });
     }
   }
@@ -384,23 +440,65 @@ const isNotWmillFile = (p: string, isDirectory: boolean) => {
 export const isWhitelisted = (p: string) => {
   return p == "." + SEP || p == "" || p == "u" || p == "f" || p == "g";
 };
-export async function ignoreF() {
-  try {
-    const ignore: {
-      accepts(file: string): boolean;
-      denies(file: string): boolean;
-    } = gitignore_parser.compile(await Deno.readTextFile(".wmillignore"));
 
-    return (p: string, isDirectory: boolean) => {
-      return (
-        !isWhitelisted(p) &&
-        (isNotWmillFile(p, isDirectory) || ignore.denies(p))
-      );
+export async function ignoreF(): Promise<
+  (p: string, isDirectory: boolean) => boolean
+> {
+  const wmillconf = await readConfigFile();
+
+  let whitelist: { approve(file: string): boolean } | undefined = undefined;
+
+  if (wmillconf?.includes || wmillconf?.excludes) {
+    if (wmillconf?.excludes && !Array.isArray(wmillconf.includes)) {
+      throw new Error("wmill.yaml/includes must be an array");
+    }
+    if (wmillconf?.excludes && !Array.isArray(wmillconf.excludes)) {
+      throw new Error("wmill.yaml/excludes must be an array");
+    }
+    whitelist = {
+      approve(file: string): boolean {
+        return (
+          (!wmillconf.includes ||
+            wmillconf.includes?.some((i) => minimatch(file, i))) &&
+          (!wmillconf?.excludes ||
+            wmillconf.excludes!.every((i) => !minimatch(file, i)))
+        );
+      },
     };
-  } catch {
-    return (p: string, isDirectory: boolean) =>
-      !isWhitelisted(p) && isNotWmillFile(p, isDirectory);
   }
+  let ign:
+    | {
+        denies(file: string): boolean;
+      }
+    | undefined = undefined;
+  try {
+    const ignoreContent = await Deno.readTextFile(".wmillignore");
+    const condensed = ignoreContent
+      .split("\n")
+      .filter((l) => l != "" && !l.startsWith("#"))
+      .join(", ");
+    log.info(
+      colors.gray(
+        `(Deprecated, use wmill.conf/includes instead) Using .wmillignore file (${condensed})`
+      )
+    );
+    ign = gitignore_parser.compile(ignoreContent);
+  } catch {}
+
+  if (ign && whitelist) {
+    throw new Error("Cannot have both .wmillignore and wmill.yaml/includes");
+  }
+
+  // new Gitignore.default({ initialRules: ignoreContent.split("\n")}).ignoreContent).compile();
+  return (p: string, isDirectory: boolean) => {
+    return (
+      !isWhitelisted(p) &&
+      (isNotWmillFile(p, isDirectory) ||
+        (!isDirectory &&
+          ((whitelist != undefined && !whitelist.approve(p)) ||
+            (ign != undefined && ign.denies(p)))))
+    );
+  };
 }
 
 async function pull(
@@ -440,13 +538,14 @@ async function pull(
     !opts.json
   );
   const local = opts.raw
-    ? undefined
+    ? await FSFSElement(Deno.cwd())
     : await FSFSElement(path.join(Deno.cwd(), ".wmill"));
   const changes = await compareDynFSElement(
     remote,
     local,
     await ignoreF(),
-    opts.json ?? false
+    opts.json ?? false,
+    opts
   );
 
   log.info(
@@ -456,7 +555,6 @@ async function pull(
     prettyChanges(changes);
     if (
       !opts.yes &&
-      !opts.raw &&
       !(await Confirm.prompt({
         message: `Do you want to apply these ${changes.length} changes?`,
         default: true,
@@ -524,6 +622,7 @@ async function pull(
           log.info(`Adding ${getTypeStrFromPath(change.path)} ${change.path}`);
         }
         await Deno.writeTextFile(target, change.content);
+        log.info(`Writing ${getTypeStrFromPath(change.path)} ${change.path}`);
         if (!opts.raw) {
           await Deno.copyFile(target, stateTarget);
         }
@@ -560,8 +659,8 @@ async function pull(
       }
     }
     log.info(
-      colors.green.underline(
-        `Done! All ${changes.length} changes applied locally.`
+      colors.bold.green.underline(
+        `\nDone! All ${changes.length} changes applied locally.`
       )
     );
   }
@@ -624,6 +723,7 @@ async function push(
     skipResources?: boolean;
     skipSecrets?: boolean;
     includeSchedules?: boolean;
+    message?: string;
   }
 ) {
   if (!opts.raw) {
@@ -645,30 +745,44 @@ async function push(
       "Computing the files to update on the remote to match local (taking .wmillignore into account)"
     )
   );
-  const remote = opts.raw
-    ? undefined
-    : ZipFSElement(
-        (await downloadZip(
-          workspace,
-          opts.plainSecrets,
-          opts.skipVariables,
-          opts.skipResources,
-          opts.skipSecrets,
-          opts.includeSchedules
-        ))!,
-        !opts.json
-      );
+  const remote = ZipFSElement(
+    (await downloadZip(
+      workspace,
+      opts.plainSecrets,
+      opts.skipVariables,
+      opts.skipResources,
+      opts.skipSecrets,
+      opts.includeSchedules
+    ))!,
+    !opts.json
+  );
+
   const local = await FSFSElement(path.join(Deno.cwd(), ""));
   const changes = await compareDynFSElement(
     local,
     remote,
     await ignoreF(),
-    opts.json ?? false
+    opts.json ?? false,
+    opts
   );
 
+  const version = await fetchVersion(workspace.remote);
+
+  log.info(colors.gray("Remote version: " + version));
+
+  const reducedVersion = version
+    .split(" v")[1]
+    .split("-")[0]
+    .split(".")
+    .map((v) => parseInt(v));
+  const lockfileUseArray =
+    reducedVersion[1] < 246 ||
+    reducedVersion[1] == 246 ||
+    reducedVersion[2] < 5;
   log.info(
     `remote (${workspace.name}) <- local: ${changes.length} changes to apply`
   );
+
   if (changes.length > 0) {
     prettyChanges(changes);
     if (
@@ -681,6 +795,7 @@ async function push(
       return;
     }
     log.info(colors.gray(`Applying changes to files ...`));
+
     const alreadySynced: string[] = [];
     for await (const change of changes) {
       const stateTarget = path.join(Deno.cwd(), ".wmill", change.path);
@@ -695,8 +810,10 @@ async function push(
         if (
           await handleScriptMetadata(
             change.path,
-            workspace.workspaceId,
-            alreadySynced
+            workspace,
+            alreadySynced,
+            opts.message,
+            lockfileUseArray
           )
         ) {
           if (!opts.raw && stateExists) {
@@ -704,7 +821,14 @@ async function push(
           }
           continue;
         } else if (
-          await handleFile(change.path, workspace.workspaceId, alreadySynced)
+          await handleFile(
+            change.path,
+            workspace,
+            alreadySynced,
+            opts.message,
+            lockfileUseArray,
+            opts
+          )
         ) {
           if (!opts.raw && stateExists) {
             await Deno.writeTextFile(stateTarget, change.after);
@@ -718,13 +842,13 @@ async function push(
         const oldObj = parseFromPath(change.path, change.before);
         const newObj = parseFromPath(change.path, change.after);
 
-        pushObj(
+        await pushObj(
           workspace.workspaceId,
           change.path,
           oldObj,
           newObj,
           opts.plainSecrets ?? false,
-          opts.raw
+          opts.message
         );
 
         if (!opts.raw && stateExists) {
@@ -737,7 +861,14 @@ async function push(
         ) {
           continue;
         } else if (
-          await handleFile(change.path, workspace.workspaceId, alreadySynced)
+          await handleFile(
+            change.path,
+            workspace,
+            alreadySynced,
+            opts.message,
+            lockfileUseArray,
+            opts
+          )
         ) {
           continue;
         }
@@ -746,22 +877,19 @@ async function push(
           log.info(`Adding ${getTypeStrFromPath(change.path)} ${change.path}`);
         }
         const obj = parseFromPath(change.path, change.content);
-        pushObj(
+        await pushObj(
           workspace.workspaceId,
           change.path,
           undefined,
           obj,
           opts.plainSecrets ?? false,
-          opts.raw
+          opts.message
         );
 
         if (!opts.raw && stateExists) {
           await Deno.writeTextFile(stateTarget, change.content);
         }
       } else if (change.name === "deleted") {
-        if (!change.path.includes(".json") && !change.path.includes(".yaml")) {
-          continue;
-        }
         log.info(`Deleting ${getTypeStrFromPath(change.path)} ${change.path}`);
         const typ = getTypeStrFromPath(change.path);
         const workspaceId = workspace.workspaceId;
@@ -769,7 +897,7 @@ async function push(
           case "script": {
             const script = await ScriptService.getScriptByPath({
               workspace: workspaceId,
-              path: removeSuffix(change.path, ".script.json"),
+              path: removeExtensionToPath(change.path),
             });
             await ScriptService.deleteScriptByHash({
               workspace: workspaceId,
@@ -798,7 +926,7 @@ async function push(
           case "flow":
             await FlowService.deleteFlowByPath({
               workspace: workspaceId,
-              path: removeSuffix(change.path, ".flow.json"),
+              path: removeSuffix(change.path, ".flow/flow.json"),
             });
             break;
           case "app":
@@ -830,8 +958,8 @@ async function push(
       }
     }
     log.info(
-      colors.green.underline(
-        `Done! All ${changes.length} changes pushed to the remote workspace ${workspace.workspaceId} named ${workspace.name}.`
+      colors.bold.green.underline(
+        `\nDone! All ${changes.length} changes pushed to the remote workspace ${workspace.workspaceId} named ${workspace.name}.`
       )
     );
   }
@@ -853,8 +981,15 @@ const command = new Command()
     "--fail-conflicts",
     "Error on conflicts (both remote and local have changes on the same item)"
   )
+  .option(
+    "--raw",
+    "Push without using state, just overwrite. (Will be removed as a flag and made the default behavior in the future)"
+  )
   .option("--yes", "Pull without needing confirmation")
-  .option("--raw", "Pull without using state, just overwrite.")
+  .option(
+    "--stateful",
+    "Pull using state tracking (create .wmill folder and needed for --fail-conflicts). Default currently but will change in favor of --raw"
+  )
   .option("--plain-secrets", "Pull secrets as plain text")
   .option("--json", "Use JSON instead of YAML")
   .option("--skip-variables", "Skip syncing variables (including secrets)")
@@ -871,15 +1006,26 @@ const command = new Command()
     "--fail-conflicts",
     "Error on conflicts (both remote and local have changes on the same item)"
   )
-  .option("--skip-pull", "Push without pulling first (you have pulled prior)")
+  .option(
+    "--raw",
+    "Push without using state, just overwrite. (Will be removed as a flag and made the default behavior in the future)"
+  )
+  .option(
+    "--stateful",
+    "Pull using state tracking (use .wmill folder and needed for --fail-conflicts). Default currently but will change in favor of --raw"
+  )
+  .option("--skip-pull", "(stateful only) Push without pulling first")
   .option("--yes", "Push without needing confirmation")
-  .option("--raw", "Push without using state, just overwrite.")
   .option("--plain-secrets", "Push secrets as plain text")
   .option("--json", "Use JSON instead of YAML")
   .option("--skip-variables", "Skip syncing variables (including secrets)")
   .option("--skip-secrets", "Skip syncing only secrets variables")
   .option("--skip-resources", "Skip syncing  resources")
   .option("--include-schedules", "Include syncing  schedules")
+  .option(
+    "--message <message:string>",
+    "Include a message that will be added to all scripts/flows/apps updated during this push"
+  )
   // deno-lint-ignore no-explicit-any
   .action(push as any);
 

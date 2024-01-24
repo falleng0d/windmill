@@ -10,6 +10,7 @@
 	import InitializeComponent from './InitializeComponent.svelte'
 
 	export let componentInput: AppInput | undefined
+	export let noInitialize = false
 
 	type SideEffectAction =
 		| {
@@ -24,16 +25,17 @@
 					| 'closeModal'
 					| 'open'
 					| 'close'
+					| 'clearFiles'
 				configuration: {
-					gotoUrl: { url: string | undefined; newTab: boolean | undefined }
+					gotoUrl: { url: (() => string) | string | undefined; newTab: boolean | undefined }
 					setTab: {
 						setTab: { id: string; index: number }[] | undefined
 					}
 					sendToast?: {
-						message: string | undefined
+						message: (() => string) | string | undefined
 					}
 					sendErrorToast?: {
-						message: string | undefined
+						message: (() => string) | string | undefined
 						appendError: boolean | undefined
 					}
 					openModal?: {
@@ -46,6 +48,9 @@
 						id: string | undefined
 					}
 					close?: {
+						id: string | undefined
+					}
+					clearFiles?: {
 						id: string | undefined
 					}
 				}
@@ -76,6 +81,8 @@
 	export let refreshOnStart: boolean = false
 	export let errorHandledByComponent: boolean = false
 	export let hasChildrens: boolean = false
+	export let allowConcurentRequests = false
+	export let onSuccess: (result: any) => void = () => {}
 
 	export function setArgs(value: any) {
 		runnableComponent?.setArgs(value)
@@ -87,6 +94,11 @@
 	if (noBackend && componentInput?.type == 'runnable') {
 		result = componentInput?.['value']
 	}
+
+	if (noBackend) {
+		initializing = false
+	}
+
 	onMount(() => {
 		$staticExporter[id] = () => {
 			return result
@@ -111,7 +123,7 @@
 		)
 	}
 
-	export function handleSideEffect(success: boolean, errorMessage?: string) {
+	export async function handleSideEffect(success: boolean, errorMessage?: string) {
 		const sideEffect = success ? doOnSuccess : doOnError
 
 		if (recomputeIds && success) {
@@ -135,33 +147,39 @@
 				}
 				break
 			case 'gotoUrl':
-				const url = sideEffect?.configuration?.gotoUrl?.url
+				let gotoUrl = sideEffect?.configuration?.gotoUrl?.url
 
-				if (!url) return
-
+				if (!gotoUrl) return
+				if (typeof gotoUrl === 'function') {
+					gotoUrl = await gotoUrl()
+				}
 				const newTab = sideEffect?.configuration?.gotoUrl?.newTab
 
 				if (newTab) {
-					window.open(url, '_blank')
+					window.open(gotoUrl, '_blank')
 				} else {
-					window.location.href = url
+					window.location.href = gotoUrl
 				}
 
 				break
 			case 'sendToast': {
-				const message = sideEffect?.configuration?.sendToast?.message
+				let message = sideEffect?.configuration?.sendToast?.message
 
 				if (!message) return
-
+				if (typeof message === 'function') {
+					message = await message()
+				}
 				sendUserToast(message, !success)
 				break
 			}
 			case 'sendErrorToast': {
-				const message = sideEffect?.configuration?.sendErrorToast?.message
+				let message = sideEffect?.configuration?.sendErrorToast?.message
 				const appendError = sideEffect?.configuration?.sendErrorToast?.appendError
 
 				if (!message) return
-
+				if (typeof message === 'function') {
+					message = await message()
+				}
 				sendUserToast(message, true, [], appendError ? errorMessage : undefined)
 				break
 			}
@@ -196,6 +214,14 @@
 				$componentControl[id].close?.()
 				break
 			}
+			case 'clearFiles': {
+				const id = sideEffect?.configuration?.clearFiles?.id
+
+				if (!id) return
+
+				$componentControl[id].clearFiles?.()
+				break
+			}
 			default:
 				break
 		}
@@ -203,10 +229,13 @@
 </script>
 
 {#if componentInput === undefined}
-	<InitializeComponent {id} />
+	{#if !noInitialize}
+		<InitializeComponent {id} />
+	{/if}
 	<slot />
 {:else if componentInput.type === 'runnable' && isRunnableDefined(componentInput)}
 	<RunnableComponent
+		{allowConcurentRequests}
 		{refreshOnStart}
 		{extraKey}
 		{hasChildrens}
@@ -228,8 +257,14 @@
 		wrapperStyle={runnableStyle}
 		{render}
 		on:started
-		on:done={() => (initializing = false)}
-		on:success={() => handleSideEffect(true)}
+		on:done
+		on:doneError
+		on:cancel
+		on:resultSet={() => (initializing = false)}
+		on:success={(e) => {
+			onSuccess(e.detail)
+			handleSideEffect(true)
+		}}
 		on:handleError={(e) => handleSideEffect(false, e.detail)}
 		{outputs}
 		{errorHandledByComponent}
@@ -237,7 +272,7 @@
 		<slot />
 	</RunnableComponent>
 {:else}
-	<NonRunnableComponent {hasChildrens} {render} bind:result {id} {componentInput}>
+	<NonRunnableComponent {noInitialize} {hasChildrens} {render} bind:result {id} {componentInput}>
 		<slot />
 	</NonRunnableComponent>
 {/if}

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Button from '$lib/components/common/button/Button.svelte'
-	import { faChevronLeft } from '@fortawesome/free-solid-svg-icons'
 	import { getContext } from 'svelte'
 	import type { AppEditorContext, AppViewerContext, GridItem, RichConfiguration } from '../../types'
 	import PanelSection from './common/PanelSection.svelte'
@@ -25,7 +24,7 @@
 	import { push } from '$lib/history'
 	import Kbd from '$lib/components/common/kbd/Kbd.svelte'
 	import StylePanel from './StylePanel.svelte'
-	import { Delete, ExternalLink } from 'lucide-svelte'
+	import { ChevronLeft, Delete, ExternalLink } from 'lucide-svelte'
 	import GridCondition from './GridCondition.svelte'
 	import { isTriggerable } from './script/utils'
 	import { inferDeps } from '../appUtilsInfer'
@@ -36,6 +35,10 @@
 
 	import ComponentControl from './ComponentControl.svelte'
 	import GridAgGridLicenseKey from './GridAgGridLicenseKey.svelte'
+	import ComponentPanelDataSource from './ComponentPanelDataSource.svelte'
+	import MenuItems from './MenuItems.svelte'
+	import DecisionTreeGraphEditor from './DecisionTreeGraphEditor.svelte'
+	import GridAgChartsLicenseKe from './GridAgChartsLicenseKe.svelte'
 
 	export let componentSettings: { item: GridItem; parent: string | undefined } | undefined =
 		undefined
@@ -111,6 +114,10 @@
 			  )
 			: undefined
 
+	// 	`
+	// /** The current's app state */
+	// const state: Record<string, any> = ${JSON.stringify(state)};`
+
 	function keydown(event: KeyboardEvent) {
 		const { key, metaKey } = event
 		if (key === 'Delete' || (key === 'Backspace' && metaKey)) {
@@ -120,11 +127,11 @@
 	}
 
 	const initialConfiguration = componentSettings?.item?.data?.type
-		? ccomponents[componentSettings.item.data.type].initialData.configuration
+		? ccomponents[componentSettings.item.data.type]?.initialData?.configuration
 		: {}
 
 	const componentInput: RichConfiguration | undefined = componentSettings?.item?.data?.type
-		? ccomponents[componentSettings?.item?.data?.type].initialData.componentInput
+		? ccomponents[componentSettings?.item?.data?.type]?.initialData?.componentInput
 		: undefined
 
 	$: componentSettings?.item?.data && ($app = $app)
@@ -169,10 +176,10 @@
 	{@const component = componentSettings.item.data}
 	<div class="flex justify-between items-center px-3 py-2 bg-surface-selected">
 		<div class="text-xs text-primary font-semibold"
-			>{components[componentSettings.item.data.type].name}</div
+			>{components[componentSettings.item.data.type]?.name ?? 'Unknown'}</div
 		>
 		<a
-			href={components[componentSettings.item.data.type].documentationLink}
+			href={components[componentSettings.item.data.type]?.documentationLink}
 			target="_blank"
 			class="text-frost-500 dark:text-frost-300 font-semibold text-xs"
 		>
@@ -183,126 +190,133 @@
 		</a>
 	</div>
 
-	<div class="flex min-h-full flex-col min-w-[150px] w-full divide-y">
-		{#if component.componentInput}
-			<PanelSection
-				title={componentSettings?.item.data.type == 'steppercomponent'
-					? 'Validations'
-					: hasInteraction
-					? 'Event handler'
-					: 'Data source'}
-				id={'component-input'}
-			>
-				<svelte:fragment slot="action">
-					<span
-						class={classNames(
-							'text-white px-2 text-2xs py-0.5 font-bold rounded-sm w-fit',
-							'bg-indigo-500'
-						)}
-					>
-						{`${component.id}`}
-					</span>
-				</svelte:fragment>
-
-				{#if componentSettings.item.data.componentInput}
-					<ComponentInputTypeEditor
-						{evalV2editor}
-						bind:componentInput={componentSettings.item.data.componentInput}
-						id={component.id}
-					/>
-
-					<div class="flex flex-col w-full gap-2 mt-2">
-						{#if componentSettings.item.data.componentInput.type === 'static'}
-							<StaticInputEditor
-								fieldType={componentInput?.fieldType}
-								subFieldType={componentInput?.subFieldType}
-								format={componentInput?.format}
-								bind:componentInput={componentSettings.item.data.componentInput}
-							/>
-						{:else if componentSettings.item.data?.componentInput?.type === 'template' || componentSettings.item.data?.componentInput?.type === 'templatev2'}
-							<div class="py-1 min-h-[28px] rounded border border-1 border-gray-500">
-								<TemplateEditor
-									fontSize={12}
-									bind:code={componentSettings.item.data.componentInput.eval}
-									{extraLib}
-									on:change={(e) => {
-										if (componentSettings?.item.data.componentInput?.type === 'templatev2') {
-											inferDeps(
-												'`' + e.detail.code + '`',
-												$worldStore.outputsById,
-												componentSettings?.item.data.componentInput,
-												app
-											)
-										}
-									}}
-								/>
-							</div>
-							{#if componentSettings.item.data?.componentInput?.type === 'templatev2'}
-								{#if componentSettings.item.data?.componentInput.connections?.length > 0}
-									<div class="flex flex-wrap gap-2 items-center">
-										<div class="text-2xs text-tertiary">Re-evaluated on changes to:</div>
-										<div class="flex flex-wrap gap-1">
-											{#each componentSettings.item.data?.componentInput.connections as connection (connection.componentId + '-' + connection.id)}
-												<span
-													class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium border"
-												>
-													{connection.componentId + '.' + connection.id}
-												</span>
-											{/each}
-										</div>
-									</div>
-								{/if}
-							{/if}
-						{:else if componentSettings.item.data.componentInput.type === 'connected' && component.componentInput !== undefined}
-							<ConnectedInputEditor
-								bind:componentInput={componentSettings.item.data.componentInput}
-							/>
-						{:else if componentSettings.item.data.componentInput.type === 'evalv2' && component.componentInput !== undefined}
-							<EvalV2InputEditor
-								bind:this={evalV2editor}
-								id={component.id}
-								bind:componentInput={componentSettings.item.data.componentInput}
-							/>
-							<a class="text-2xs" on:click={transformToFrontend} href="#">
-								transform to a frontend script
-							</a>
-						{:else if componentSettings.item.data.componentInput?.type === 'runnable' && component.componentInput !== undefined}
-							<RunnableInputEditor
-								appComponent={component}
-								bind:appInput={componentSettings.item.data.componentInput}
-								defaultUserInput={component.type == 'formcomponent' ||
-									component.type == 'formbuttoncomponent'}
-							/>
+	<div class="flex min-h-[calc(100%-32px)] flex-col min-w-[150px] w-full divide-y">
+		<ComponentPanelDataSource bind:component={componentSettings.item.data}>
+			{#if component.componentInput}
+				<PanelSection
+					title={componentSettings?.item.data.type == 'steppercomponent'
+						? 'Validations'
+						: componentSettings?.item.data.type == 's3fileinputcomponent'
+						? 'Path template'
+						: hasInteraction
+						? 'Event handler'
+						: 'Data source'}
+					id={'component-input'}
+				>
+					<svelte:fragment slot="action">
+						{#if componentSettings.item.data.type !== 'plotlycomponentv2'}
+							<span
+								class={classNames(
+									'text-white px-2 text-2xs py-0.5 font-bold rounded-sm w-fit',
+									'bg-indigo-500'
+								)}
+							>
+								{`${component.id}`}
+							</span>
 						{/if}
-					</div>
-				{/if}
-				{#key $stateId}
-					{#if componentSettings.item.data.componentInput?.type === 'runnable'}
-						{#if Object.keys(componentSettings.item.data.componentInput.fields ?? {}).length > 0}
-							<div class="w-full">
-								<div class="flex flex-row items-center gap-2 text-sm font-semibold">
-									Runnable Inputs
+					</svelte:fragment>
 
-									<Tooltip wrapperClass="flex">
-										The runnable inputs are inferred from the inputs of the flow or script
-										parameters this component is attached to.
-									</Tooltip>
-								</div>
+					{#if componentSettings.item.data.componentInput}
+						<ComponentInputTypeEditor
+							{evalV2editor}
+							bind:componentInput={componentSettings.item.data.componentInput}
+						/>
 
-								<InputsSpecsEditor
+						<div class="flex flex-col w-full gap-2 mt-2">
+							{#if componentSettings.item.data.componentInput.type === 'static'}
+								<StaticInputEditor
 									id={component.id}
-									shouldCapitalize={false}
-									displayType
-									bind:inputSpecs={componentSettings.item.data.componentInput.fields}
-									userInputEnabled={component.type === 'formcomponent' ||
-										component.type === 'formbuttoncomponent'}
+									fieldType={componentInput?.fieldType}
+									subFieldType={componentInput?.subFieldType}
+									format={componentInput?.format}
+									bind:componentInput={componentSettings.item.data.componentInput}
 								/>
-							</div>
-						{/if}
+							{:else if componentSettings.item.data?.componentInput?.type === 'template' || componentSettings.item.data?.componentInput?.type === 'templatev2'}
+								<div class="py-1 min-h-[28px] rounded border border-1 border-gray-500">
+									<TemplateEditor
+										fontSize={12}
+										bind:code={componentSettings.item.data.componentInput.eval}
+										{extraLib}
+										on:change={(e) => {
+											if (componentSettings?.item.data.componentInput?.type === 'templatev2') {
+												inferDeps(
+													'`' + e.detail.code + '`',
+													$worldStore.outputsById,
+													componentSettings?.item.data.componentInput,
+													app
+												)
+											}
+										}}
+									/>
+								</div>
+								{#if componentSettings.item.data?.componentInput?.type === 'templatev2'}
+									{#if componentSettings.item.data?.componentInput.connections?.length > 0}
+										<div class="flex flex-wrap gap-2 items-center">
+											<div class="text-2xs text-tertiary">Re-evaluated on changes to:</div>
+											<div class="flex flex-wrap gap-1">
+												{#each componentSettings.item.data?.componentInput.connections ?? [] as connection (connection.componentId + '-' + connection.id)}
+													<span
+														class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium border"
+													>
+														{connection.componentId + '.' + connection.id}
+													</span>
+												{/each}
+											</div>
+										</div>
+									{/if}
+								{/if}
+							{:else if componentSettings.item.data.componentInput.type === 'connected' && component.componentInput !== undefined}
+								<ConnectedInputEditor
+									bind:componentInput={componentSettings.item.data.componentInput}
+								/>
+							{:else if componentSettings.item.data.componentInput.type === 'evalv2' && component.componentInput !== undefined}
+								<EvalV2InputEditor
+									field="nonrunnable"
+									bind:this={evalV2editor}
+									id={component.id}
+									bind:componentInput={componentSettings.item.data.componentInput}
+								/>
+								<a class="text-2xs" on:click={transformToFrontend} href="#">
+									transform to a frontend script
+								</a>
+							{:else if componentSettings.item.data.componentInput?.type === 'runnable' && component.componentInput !== undefined}
+								<RunnableInputEditor
+									appComponent={component}
+									bind:appInput={componentSettings.item.data.componentInput}
+									defaultUserInput={component.type == 'formcomponent' ||
+										component.type == 'formbuttoncomponent'}
+								/>
+							{/if}
+						</div>
 					{/if}
-				{/key}
-			</PanelSection>
-		{/if}
+					{#key $stateId}
+						{#if componentSettings.item.data.componentInput?.type === 'runnable'}
+							{#if Object.keys(componentSettings.item.data.componentInput.fields ?? {}).length > 0}
+								<div class="w-full">
+									<div class="flex flex-row items-center gap-2 text-sm font-semibold">
+										Runnable Inputs
+
+										<Tooltip wrapperClass="flex">
+											The runnable inputs are inferred from the inputs of the flow or script
+											parameters this component is attached to.
+										</Tooltip>
+									</div>
+
+									<InputsSpecsEditor
+										id={component.id}
+										shouldCapitalize={false}
+										displayType
+										bind:inputSpecs={componentSettings.item.data.componentInput.fields}
+										userInputEnabled={component.type === 'formcomponent' ||
+											component.type === 'formbuttoncomponent'}
+									/>
+								</div>
+							{/if}
+						{/if}
+					{/key}
+				</PanelSection>
+			{/if}
+		</ComponentPanelDataSource>
 
 		<ComponentControl type={component.type} />
 
@@ -315,6 +329,8 @@
 			/>
 		{:else if componentSettings.item.data.type === 'aggridcomponentee'}
 			<GridAgGridLicenseKey bind:license={componentSettings.item.data.license} />
+		{:else if componentSettings.item.data.type === 'agchartscomponentee'}
+			<GridAgChartsLicenseKe bind:license={componentSettings.item.data.license} />
 		{:else if componentSettings.item.data.type === 'steppercomponent'}
 			<GridTab
 				bind:tabs={componentSettings.item.data.tabs}
@@ -331,6 +347,12 @@
 				bind:conditions={componentSettings.item.data.conditions}
 				bind:component={componentSettings.item.data}
 			/>
+		{:else if componentSettings.item.data.type === 'decisiontreecomponent'}
+			<DecisionTreeGraphEditor
+				bind:nodes={componentSettings.item.data.nodes}
+				bind:component={componentSettings.item.data}
+				rebuildOnChange={componentSettings.item.data.nodes}
+			/>
 		{:else if componentSettings.item.data.type === 'verticalsplitpanescomponent' || componentSettings.item.data.type === 'horizontalsplitpanescomponent'}
 			<GridPane
 				bind:panes={componentSettings.item.data.panes}
@@ -338,6 +360,8 @@
 			/>
 		{:else if componentSettings.item.data.type === 'tablecomponent' && Array.isArray(componentSettings.item.data.actionButtons)}
 			<TableActions id={component.id} bind:components={componentSettings.item.data.actionButtons} />
+		{:else if componentSettings.item.data.type === 'menucomponent' && Array.isArray(componentSettings.item.data.menuItems)}
+			<MenuItems id={component.id} bind:components={componentSettings.item.data.menuItems} />
 		{/if}
 
 		{#if Object.values(initialConfiguration).length > 0}
@@ -347,14 +371,14 @@
 					inputSpecsConfiguration={initialConfiguration}
 					bind:inputSpecs={componentSettings.item.data.configuration}
 					userInputEnabled={false}
+					acceptSelf
 				/>
 			</PanelSection>
 		{:else if componentSettings.item.data.type != 'containercomponent'}
-			<div class="h-full w-full text-sm text-tertiary text-center py-8 px-2"
-				>{ccomponents[component.type].name} has no configuration</div
-			>
+			<div class="h-full w-full text-sm text-tertiary text-center py-8 px-2">
+				{ccomponents[component.type].name} has no configuration
+			</div>
 		{/if}
-
 		{#if (`recomputeIds` in componentSettings.item.data && Array.isArray(componentSettings.item.data.recomputeIds)) || componentSettings.item.data.type === 'buttoncomponent' || componentSettings.item.data.type === 'formcomponent' || componentSettings.item.data.type === 'formbuttoncomponent' || componentSettings.item.data.type === 'checkboxcomponent'}
 			<Recompute
 				bind:recomputeIds={componentSettings.item.data.recomputeIds}
@@ -364,14 +388,14 @@
 
 		<div class="grow shrink" />
 
-		{#if Object.keys(ccomponents[component.type].customCss ?? {}).length > 0}
+		{#if Object.keys(ccomponents[component.type]?.customCss ?? {}).length > 0}
 			<PanelSection title="Styling">
 				<div slot="action" class="flex justify-end flex-wrap gap-1">
 					<Button
 						color="light"
 						size="xs"
 						variant="border"
-						startIcon={{ icon: faChevronLeft }}
+						startIcon={{ icon: ChevronLeft }}
 						on:click={() => secondaryMenuLeft.toggle(StylePanel, {})}
 					>
 						Show
@@ -380,7 +404,7 @@
 				<AlignmentEditor bind:component={componentSettings.item.data} />
 				{#if viewCssOptions}
 					<div transition:slide|local class="w-full">
-						{#each Object.keys(ccomponents[component.type].customCss ?? {}) as name}
+						{#each Object.keys(ccomponents[component.type]?.customCss ?? {}) as name}
 							{#if componentSettings.item.data?.customCss != undefined}
 								<div class="w-full mb-2">
 									<CssProperty

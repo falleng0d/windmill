@@ -77,6 +77,26 @@
         "ordinal": 14,
         "name": "error_handler_extra_args",
         "type_info": "Json"
+      },
+      {
+        "ordinal": 15,
+        "name": "error_handler_muted_on_cancel",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "large_file_storage",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 17,
+        "name": "git_sync",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 18,
+        "name": "default_app",
+        "type_info": "Varchar"
       }
     ],
     "parameters": {
@@ -99,6 +119,10 @@
       true,
       true,
       false,
+      true,
+      false,
+      true,
+      true,
       true
     ]
   },

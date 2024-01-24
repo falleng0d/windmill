@@ -9,7 +9,7 @@
 	import Node from '../../nodes/views/Node.svelte'
 
 	import { determineD3Instance } from '../..//d3/controllers/d3'
-	import { findStore } from '../../store/controllers/storeApi'
+	import { findStore } from '../../store/models/store'
 
 	import { Expand, Minus, Plus } from 'lucide-svelte'
 	import Toggle from '$lib/components/Toggle.svelte'
@@ -161,6 +161,9 @@
 								on:newBranch={(e) => node?.data?.custom?.cb?.('newBranch', e.detail)}
 								on:deleteBranch={(e) => node?.data?.custom?.cb?.('deleteBranch', e.detail)}
 								on:move={(e) => node?.data?.custom?.cb?.('move', e.detail)}
+								on:nodeInsert={(e) => node?.data?.custom?.cb?.('nodeInsert', e.detail)}
+								on:addBranch={(e) => node?.data?.custom?.cb?.('addBranch', e.detail)}
+								on:removeBranch={(e) => node?.data?.custom?.cb?.('removeBranch', e.detail)}
 								{...node.data.custom.props}
 							/>
 						</Node>

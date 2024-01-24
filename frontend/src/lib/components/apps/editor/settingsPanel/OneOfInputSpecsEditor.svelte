@@ -13,6 +13,8 @@
 	export let id: string
 	export let resourceOnly: boolean
 	export let tooltip: string | undefined
+	export let disabledOptions: string[] = []
+	export let acceptSelf: boolean = false
 
 	$: {
 		if (oneOf == undefined) {
@@ -63,7 +65,7 @@
 		}}
 	>
 		{#each Object.keys(inputSpecsConfiguration ?? {}) as choice}
-			{#if !getValueOfDeprecated(inputSpecsConfiguration[choice]) || oneOf.selected === choice}
+			{#if (!disabledOptions.includes(choice) && !getValueOfDeprecated(inputSpecsConfiguration[choice])) || oneOf.selected === choice}
 				<option value={choice}>{labels?.[choice] ?? choice}</option>
 			{/if}
 		{/each}
@@ -73,12 +75,17 @@
 	{/if}
 	<div class="flex flex-col gap-4">
 		{#each Object.keys(inputSpecsConfiguration?.[oneOf.selected] ?? {}) as nestedKey}
-			{@const config = inputSpecsConfiguration?.[oneOf.selected]?.[nestedKey]}
+			{@const config = {
+				...inputSpecsConfiguration?.[oneOf.selected]?.[nestedKey],
+				...oneOf.configuration?.[oneOf.selected]?.[nestedKey]
+			}}
+
 			{#if config && oneOf.configuration[oneOf.selected]}
 				<InputsSpecEditor
 					key={nestedKey}
 					bind:componentInput={oneOf.configuration[oneOf.selected][nestedKey]}
 					{id}
+					{acceptSelf}
 					userInputEnabled={false}
 					{shouldCapitalize}
 					{resourceOnly}
@@ -89,6 +96,8 @@
 					placeholder={config?.['placeholder']}
 					customTitle={config?.['customTitle']}
 					tooltip={config?.['tooltip']}
+					fileUpload={config?.['fileUpload']}
+					loading={config?.['loading']}
 				/>
 			{/if}
 		{/each}

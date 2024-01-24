@@ -9,7 +9,6 @@
 use gethostname::gethostname;
 use git_version::git_version;
 use rand::Rng;
-use serde::Deserialize;
 use sqlx::{postgres::PgListener, Pool, Postgres};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -20,27 +19,34 @@ use tokio::{
     fs::{metadata, DirBuilder},
     sync::RwLock,
 };
+use windmill_api::HTTP_CLIENT;
 use windmill_common::{
     global_settings::{
-        BASE_URL_SETTING, CUSTOM_TAGS_SETTING, ENV_SETTINGS, EXTRA_PIP_INDEX_URL_SETTING,
+        BASE_URL_SETTING, BUNFIG_INSTALL_SCOPES_SETTING, CUSTOM_TAGS_SETTING,
+        DISABLE_STATS_SETTING, ENV_SETTINGS, EXPOSE_DEBUG_METRICS_SETTING, EXPOSE_METRICS_SETTING,
+        EXTRA_PIP_INDEX_URL_SETTING, JOB_DEFAULT_TIMEOUT_SECS_SETTING, KEEP_JOB_DIR_SETTING,
         LICENSE_KEY_SETTING, NPM_CONFIG_REGISTRY_SETTING, OAUTH_SETTING,
-        REQUEST_SIZE_LIMIT_SETTING, RETENTION_PERIOD_SECS_SETTING,
+        REQUEST_SIZE_LIMIT_SETTING, REQUIRE_PREEXISTING_USER_FOR_OAUTH_SETTING,
+        RETENTION_PERIOD_SECS_SETTING,
     },
-    utils::rd_string,
+    stats::schedule_stats,
+    utils::{rd_string, Mode},
     worker::{reload_custom_tags_setting, WORKER_GROUP},
-    DB, METRICS_ADDR,
+    DB, METRICS_ADDR, METRICS_ENABLED,
 };
 use windmill_worker::{
     BUN_CACHE_DIR, BUN_TMP_CACHE_DIR, DENO_CACHE_DIR, DENO_CACHE_DIR_DEPS, DENO_CACHE_DIR_NPM,
     DENO_TMP_CACHE_DIR, DENO_TMP_CACHE_DIR_DEPS, DENO_TMP_CACHE_DIR_NPM, GO_BIN_CACHE_DIR,
     GO_CACHE_DIR, GO_TMP_CACHE_DIR, HUB_CACHE_DIR, HUB_TMP_CACHE_DIR, LOCK_CACHE_DIR,
-    PIP_CACHE_DIR, ROOT_TMP_CACHE_DIR, TAR_PIP_TMP_CACHE_DIR,
+    PIP_CACHE_DIR, POWERSHELL_CACHE_DIR, ROOT_TMP_CACHE_DIR, TAR_PIP_TMP_CACHE_DIR,
 };
 
 use crate::monitor::{
-    initial_load, monitor_db, reload_base_url_setting, reload_extra_pip_index_url_setting,
-    reload_license_key, reload_npm_config_registry_setting, reload_retention_period_setting,
-    reload_server_config, reload_worker_config,
+    initial_load, load_keep_job_dir, load_require_preexisting_user, monitor_db, monitor_pool,
+    reload_base_url_setting, reload_bunfig_install_scopes_setting,
+    reload_extra_pip_index_url_setting, reload_job_default_timeout_setting, reload_license_key,
+    reload_npm_config_registry_setting, reload_retention_period_setting, reload_server_config,
+    reload_worker_config,
 };
 
 const GIT_VERSION: &str = git_version!(args = ["--tag", "--always"], fallback = "unknown-version");
@@ -51,17 +57,16 @@ const DEFAULT_SERVER_BIND_ADDR: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
 mod ee;
 mod monitor;
 
-#[derive(Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum Mode {
-    Worker,
-    Server,
-    Standalone,
-}
+#[cfg(feature = "pg_embed")]
+mod pg_embed;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
+
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info")
+    }
 
     #[cfg(not(feature = "flamegraph"))]
     windmill_common::tracing_init::initialize_tracing();
@@ -94,6 +99,21 @@ async fn main() -> anyhow::Result<()> {
             } else if &x == "worker" {
                 tracing::info!("Binary is in 'worker' mode");
                 Mode::Worker
+            } else if &x == "agent" {
+                tracing::info!("Binary is in 'agent' mode");
+                if std::env::var("BASE_INTERNAL_URL").is_err() {
+                    panic!("BASE_INTERNAL_URL is required in agent mode")
+                }
+                if std::env::var("JOB_TOKEN").is_err() {
+                    tracing::warn!("JOB_TOKEN is not passed, hence workers will still create one ephemeral token per job and the DATABASE_URL need to be of a role that can INSERT into the token table")
+                }
+
+                #[cfg(not(feature = "enterprise"))]
+                {
+                    panic!("Agent mode is only available in the EE, ignoring...");
+                }
+
+                Mode::Agent
             } else {
                 if &x != "standalone" {
                     tracing::error!("mode not recognized, defaulting to standalone: {x}");
@@ -122,13 +142,12 @@ async fn main() -> anyhow::Result<()> {
             "We STRONGLY recommend using at most 1 worker per container, use at your own risks"
         );
     }
-    let metrics_addr: Option<SocketAddr> = *METRICS_ADDR;
 
     let server_mode = !std::env::var("DISABLE_SERVER")
         .ok()
         .and_then(|x| x.parse::<bool>().ok())
         .unwrap_or(false)
-        && mode != Mode::Worker;
+        && (mode == Mode::Server || mode == Mode::Standalone);
 
     let server_bind_address: IpAddr = if server_mode {
         std::env::var("SERVER_BIND_ADDR")
@@ -160,9 +179,27 @@ async fn main() -> anyhow::Result<()> {
         config
     });
 
+    #[cfg(feature = "pg_embed")]
+    let _pg = {
+        let (db_url, pg) = pg_embed::start().await.expect("pg embed");
+        tracing::info!("Use embedded pg: {db_url}");
+        std::env::set_var("DATABASE_URL", db_url);
+        pg
+    };
+
     tracing::info!("Connecting to database...");
     let db = windmill_common::connect_db(server_mode).await?;
     tracing::info!("Database connected");
+
+    let num_version = sqlx::query_scalar!("SELECT version()").fetch_one(&db).await;
+
+    tracing::info!(
+        "PostgreSQL version: {} (windmill require PG >= 14)",
+        num_version
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "UNKNOWN".to_string())
+    );
 
     let rsmq = if let Some(config) = rsmq_config {
         tracing::info!("Redis config set: {:?}", config);
@@ -171,11 +208,45 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    // migration code to avoid break
-    windmill_api::migrate_db(&db).await?;
+    let is_agent = mode == Mode::Agent;
 
-    let (tx, rx) = tokio::sync::broadcast::channel::<()>(3);
-    let shutdown_signal = windmill_common::shutdown_signal(tx.clone(), rx.resubscribe());
+    if !is_agent {
+        let last_mig_version = sqlx::query_scalar!(
+            "select version from _sqlx_migrations order by version desc limit 1;"
+        )
+        .fetch_optional(&db)
+        .await
+        .ok()
+        .flatten();
+
+        tracing::info!(
+        "Last migration version: {last_mig_version:?}. Starting potential migration of the db if first connection on a new windmill version (can take a while depending on the migration) ...",
+    );
+
+        // migration code to avoid break
+        windmill_api::migrate_db(&db).await?;
+
+        let new_last_mig_version = sqlx::query_scalar!(
+            "select version from _sqlx_migrations order by version desc limit 1;"
+        )
+        .fetch_optional(&db)
+        .await
+        .ok()
+        .flatten();
+
+        if last_mig_version != new_last_mig_version {
+            tracing::info!(
+                "Completed migration of the db. New  migration version: {}",
+                new_last_mig_version.unwrap_or(-1)
+            );
+        } else {
+            tracing::info!("No migration, db was up-to-date");
+        }
+    }
+    let (killpill_tx, killpill_rx) = tokio::sync::broadcast::channel::<()>(2);
+    let (killpill_phase2_tx, killpill_phase2_rx) = tokio::sync::broadcast::channel::<()>(2);
+    let shutdown_signal =
+        windmill_common::shutdown_signal(killpill_tx.clone(), killpill_rx.resubscribe());
 
     #[cfg(feature = "enterprise")]
     tracing::info!(
@@ -206,21 +277,29 @@ Windmill Community Edition {GIT_VERSION}
             port_var.unwrap_or(0)
         };
 
+        let default_base_internal_url = format!("http://localhost:{}", port.to_string());
         // since it's only on server mode, the port is statically defined
-        let base_internal_url: String = format!("http://localhost:{}", port.to_string());
+        let base_internal_url: String = if let Ok(base_url) = std::env::var("BASE_INTERNAL_URL") {
+            if !is_agent {
+                tracing::warn!("BASE_INTERNAL_URL is now unecessary and ignored unless the mode is 'agent', you can remove it.");
+                default_base_internal_url.clone()
+            } else {
+                base_url
+            }
+        } else {
+            default_base_internal_url.clone()
+        };
 
-        initial_load(&db, tx.clone(), worker_mode, server_mode).await;
+        initial_load(&db, killpill_tx.clone(), worker_mode, server_mode).await;
 
         monitor_db(&db, &base_internal_url, rsmq.clone(), server_mode).await;
 
-        if std::env::var("BASE_INTERNAL_URL").is_ok() {
-            tracing::warn!("BASE_INTERNAL_URL is now unecessary and ignored, you can remove it.");
-        }
+        monitor_pool(&db).await;
 
         let addr = SocketAddr::from((server_bind_address, port));
 
         let rsmq2 = rsmq.clone();
-        let (port_tx, port_rx) = tokio::sync::oneshot::channel::<u16>();
+        let (base_internal_tx, base_internal_rx) = tokio::sync::oneshot::channel::<String>();
 
         DirBuilder::new()
             .recursive(true)
@@ -229,35 +308,55 @@ Windmill Community Edition {GIT_VERSION}
             .expect("could not create initial server dir");
 
         let server_f = async {
-            windmill_api::run_server(db.clone(), rsmq2, addr, rx.resubscribe(), port_tx).await?;
+            if !is_agent {
+                windmill_api::run_server(
+                    db.clone(),
+                    rsmq2,
+                    addr,
+                    killpill_phase2_rx.resubscribe(),
+                    base_internal_tx,
+                    server_mode,
+                )
+                .await?;
+            } else {
+                base_internal_tx
+                    .send(base_internal_url.clone())
+                    .map_err(|e| {
+                        anyhow::anyhow!("Could not send base_internal_url to agent: {e}")
+                    })?;
+            }
             Ok(()) as anyhow::Result<()>
         };
 
         let workers_f = async {
-            let port = port_rx.await?;
-            let base_internal_url: String = format!("http://localhost:{}", port.to_string());
+            let base_internal_url = base_internal_rx.await?;
             if worker_mode {
                 run_workers(
                     db.clone(),
-                    rx.resubscribe(),
-                    tx.clone(),
+                    killpill_rx.resubscribe(),
+                    killpill_tx.clone(),
                     num_workers,
                     base_internal_url.clone(),
                     rsmq.clone(),
+                    mode.clone() == Mode::Agent,
                 )
                 .await?;
                 tracing::info!("All workers exited.");
-                tx.send(())?; // signal server to shutdown
+                killpill_tx.send(())?;
+            } else {
+                killpill_rx.resubscribe().recv().await?;
             }
+            tracing::info!("Starting phase 2 of shutdown");
+            killpill_phase2_tx.send(())?;
             Ok(()) as anyhow::Result<()>
         };
 
         let monitor_f = async {
             let db = db.clone();
-            let tx = tx.clone();
+            let tx = killpill_tx.clone();
             let rsmq = rsmq.clone();
 
-            let mut rx = rx.resubscribe();
+            let mut rx = killpill_rx.resubscribe();
             let base_internal_url = base_internal_url.to_string();
             let h = tokio::spawn(async move {
                 let mut listener = retry_listen_pg(&db).await;
@@ -320,21 +419,47 @@ Windmill Community Edition {GIT_VERSION}
                                                 RETENTION_PERIOD_SECS_SETTING => {
                                                     reload_retention_period_setting(&db).await
                                                 },
+                                                JOB_DEFAULT_TIMEOUT_SECS_SETTING => {
+                                                    reload_job_default_timeout_setting(&db).await
+                                                },
                                                 EXTRA_PIP_INDEX_URL_SETTING => {
                                                     reload_extra_pip_index_url_setting(&db).await
                                                 },
                                                 NPM_CONFIG_REGISTRY_SETTING => {
                                                     reload_npm_config_registry_setting(&db).await
                                                 },
-                                                REQUEST_SIZE_LIMIT_SETTING => {
-                                                    tracing::info!("Request limit size change detected, killing server expecting to be restarted");
-                                                    // we wait a bit randomly to avoid having all servers shutdown at same time
-                                                    let rd_delay = rand::thread_rng().gen_range(0..4);
-                                                    tokio::time::sleep(Duration::from_secs(rd_delay)).await;
-                                                    if let Err(e) = tx.send(()) {
-                                                        tracing::error!(error = %e, "Could not send killpill to server");
+                                                BUNFIG_INSTALL_SCOPES_SETTING => {
+                                                    reload_bunfig_install_scopes_setting(&db).await
+                                                },
+                                                KEEP_JOB_DIR_SETTING => {
+                                                    load_keep_job_dir(&db).await;
+                                                },
+                                                REQUIRE_PREEXISTING_USER_FOR_OAUTH_SETTING => {
+                                                    load_require_preexisting_user(&db).await;
+                                                },
+                                                EXPOSE_METRICS_SETTING | EXPOSE_DEBUG_METRICS_SETTING => {
+                                                    if n.payload() != EXPOSE_DEBUG_METRICS_SETTING || worker_mode {
+                                                        tracing::info!("Metrics setting changed, restarting");
+                                                        // we wait a bit randomly to avoid having all serverss and workers shutdown at same time
+                                                        let rd_delay = rand::thread_rng().gen_range(0..4);
+                                                        tokio::time::sleep(Duration::from_secs(rd_delay)).await;
+                                                        if let Err(e) = tx.send(()) {
+                                                            tracing::error!(error = %e, "Could not send killpill to server");
+                                                        }
                                                     }
-                                                }
+                                                },
+                                                REQUEST_SIZE_LIMIT_SETTING => {
+                                                    if server_mode {
+                                                        tracing::info!("Request limit size change detected, killing server expecting to be restarted");
+                                                        // we wait a bit randomly to avoid having all servers shutdown at same time
+                                                        let rd_delay = rand::thread_rng().gen_range(0..4);
+                                                        tokio::time::sleep(Duration::from_secs(rd_delay)).await;
+                                                        if let Err(e) = tx.send(()) {
+                                                            tracing::error!(error = %e, "Could not send killpill to server");
+                                                        }
+                                                    }
+                                                },
+                                                DISABLE_STATS_SETTING => {},
                                                 a @_ => {
                                                     tracing::info!("Unrecognized Global Setting Change Payload: {:?}", a);
                                                 }
@@ -368,17 +493,32 @@ Windmill Community Edition {GIT_VERSION}
         };
 
         let metrics_f = async {
-            if let Some(_addr) = metrics_addr {
+            if METRICS_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
                 #[cfg(not(feature = "enterprise"))]
-                panic!("Metrics are only available in the Enterprise Edition");
+                tracing::error!("Metrics are only available in the EE, ignoring...");
 
                 #[cfg(feature = "enterprise")]
-                windmill_common::serve_metrics(_addr, rx.resubscribe(), num_workers > 0).await;
+                windmill_common::serve_metrics(
+                    *METRICS_ADDR,
+                    killpill_phase2_rx.resubscribe(),
+                    num_workers > 0,
+                )
+                .await;
             }
             Ok(()) as anyhow::Result<()>
         };
 
-        futures::try_join!(shutdown_signal, server_f, metrics_f, workers_f, monitor_f)?;
+        let instance_name = rd_string(8);
+        schedule_stats(
+            instance_name,
+            mode.clone(),
+            &db,
+            &HTTP_CLIENT,
+            cfg!(feature = "enterprise"),
+        )
+        .await;
+
+        futures::try_join!(shutdown_signal, workers_f, monitor_f, server_f, metrics_f)?;
     } else {
         tracing::info!("Nothing to do, exiting.");
     }
@@ -443,6 +583,7 @@ pub async fn run_workers<R: rsmq_async::RsmqConnection + Send + Sync + Clone + '
     num_workers: i32,
     base_internal_url: String,
     rsmq: Option<R>,
+    agent_mode: bool,
 ) -> anyhow::Result<()> {
     let instance_name = gethostname()
         .to_str()
@@ -483,6 +624,7 @@ pub async fn run_workers<R: rsmq_async::RsmqConnection + Send + Sync + Clone + '
         GO_CACHE_DIR,
         GO_BIN_CACHE_DIR,
         HUB_CACHE_DIR,
+        POWERSHELL_CACHE_DIR,
         TAR_PIP_TMP_CACHE_DIR,
         DENO_TMP_CACHE_DIR,
         DENO_TMP_CACHE_DIR_DEPS,
@@ -502,7 +644,7 @@ pub async fn run_workers<R: rsmq_async::RsmqConnection + Send + Sync + Clone + '
     for i in 1..(num_workers + 1) {
         let db1 = db.clone();
         let instance_name = instance_name.clone();
-        let worker_name = format!("wk-{}-{}", &instance_name, rd_string(5));
+        let worker_name = format!("wk-{}-{}-{}", *WORKER_GROUP, &instance_name, rd_string(5));
         let ip = ip.clone();
         let rx = rx.resubscribe();
         let tx = tx.clone();
@@ -523,6 +665,7 @@ pub async fn run_workers<R: rsmq_async::RsmqConnection + Send + Sync + Clone + '
                 &base_internal_url,
                 rsmq2,
                 sync_barrier,
+                agent_mode,
             )
             .await
         })));

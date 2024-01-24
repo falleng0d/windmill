@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Setting, SettingStorage } from './instanceSettings'
+	import { settings, settingsKeys, type SettingStorage } from './instanceSettings'
 	import { Button, Tab, TabContent, Tabs } from '$lib/components/common'
 	import { ConfigService, SettingService } from '$lib/gen'
 	import Toggle from '$lib/components/Toggle.svelte'
@@ -7,7 +7,6 @@
 	import Tooltip from '$lib/components/Tooltip.svelte'
 	import { sendUserToast } from '$lib/toast'
 	import OAuthSetting from '$lib/components/OAuthSetting.svelte'
-	import { faPlus } from '@fortawesome/free-solid-svg-icons'
 	import { deepEqual } from 'fast-equals'
 	import OktaSetting from './OktaSetting.svelte'
 	import CloseButton from './common/CloseButton.svelte'
@@ -17,118 +16,15 @@
 	import { capitalize } from '$lib/utils'
 	import { enterpriseLicense } from '$lib/stores'
 	import CustomOauth from './CustomOauth.svelte'
-	import { AlertTriangle } from 'lucide-svelte'
+	import { AlertTriangle, Plus } from 'lucide-svelte'
+	import CustomSso from './CustomSso.svelte'
+	import AuthentikSetting from '$lib/components/AuthentikSetting.svelte'
+	import AutheliaSetting from '$lib/components/AutheliaSetting.svelte'
+	import KanidmSetting from '$lib/components/KanidmSetting.svelte'
+	import ZitadelSetting from '$lib/components/ZitadelSetting.svelte'
 
-	export const settings: Record<string, Setting[]> = {
-		Core: [
-			{
-				label: 'Base Url',
-				description: 'Public base url of the instance',
-				key: 'base_url',
-				fieldType: 'text',
-				placeholder: 'https://windmill.com',
-				storage: 'setting',
-				isValid: (value: string | undefined) =>
-					value ? value?.startsWith('http') && !value?.endsWith('/') : true
-			},
-			{
-				label: 'Request Size Limit In MB',
-				description: 'Maximum size of HTTP requests in MB.',
-				cloudonly: true,
-				key: 'request_size_limit_mb',
-				fieldType: 'number',
-				placeholder: '50',
-				storage: 'setting'
-			},
-			{
-				label: 'Retention Period in secs',
-				key: 'retention_period_secs',
-				description: 'How long to keep the jobs data in the database.',
-				fieldType: 'seconds',
-				placeholder: '60',
-				storage: 'setting',
-				cloudonly: false
-			},
-			{
-				label: 'Max Timeout for sync endpoints',
-				key: 'timeout_wait_result',
-				cloudonly: true,
-				fieldType: 'seconds',
-				placeholder: '60',
-				storage: 'config'
-			},
-			{
-				label: 'License Key',
-				description: 'License Key required to use the EE (switch image for windmill-ee)',
-				key: 'license_key',
-				fieldType: 'license_key',
-				placeholder: 'only needed to prepare upgrade to EE',
-				storage: 'setting'
-			},
-			{
-				label: 'Pip Extra Index Url',
-				description: 'Add private PIP registry',
-				key: 'pip_extra_index_url',
-				fieldType: 'text',
-				placeholder: 'https://username:password@pypi.company.com/simple',
-				storage: 'setting',
-				ee_only:
-					'You can still set this setting by using PIP_EXTRA_INDEX_URL as env variable to the worker containers'
-			},
-			{
-				label: 'Npm Config Registry',
-				description: 'Add private NPM registry',
-				key: 'npm_config_registry',
-				fieldType: 'text',
-				placeholder: 'https://yourregistry',
-				storage: 'setting',
-				ee_only:
-					'You can still set this setting by using NPM_CONFIG_REGISTRY as env variable to the worker containers'
-			}
-		],
-		SMTP: [
-			{
-				label: 'Host',
-				key: 'smtp_host',
-				fieldType: 'text',
-				placeholder: 'smtp.gmail.com',
-				storage: 'config'
-			},
-			{
-				label: 'Port',
-				key: 'smtp_port',
-				fieldType: 'number',
-				placeholder: '587',
-				storage: 'config'
-			},
-			{
-				label: 'Username',
-				key: 'smtp_username',
-				fieldType: 'text',
-				placeholder: 'ruben@windmill.dev',
-				storage: 'config'
-			},
-			{
-				label: 'Password',
-				key: 'smtp_password',
-				fieldType: 'password',
-				storage: 'config'
-			},
-			{
-				label: 'From Address',
-				key: 'smtp_from',
-				placeholder: 'noreply@windmill.dev',
-				fieldType: 'email',
-				storage: 'config'
-			},
-			{
-				label: 'Implicit TLS',
-				key: 'smtp_tls_implicit',
-				fieldType: 'boolean',
-				storage: 'config'
-			}
-		]
-	}
+	export let tab: string = 'Core'
+	export let hideTabs: boolean = false
 
 	let values: Record<string, any> = {}
 	let initialOauths: Record<string, any> = {}
@@ -163,6 +59,9 @@
 			).flat()
 		)
 		values = JSON.parse(JSON.stringify(initialValues))
+		if (values['base_url'] == undefined) {
+			values['base_url'] = window.location.origin
+		}
 		if (values['retention_period_secs'] == undefined) {
 			values['retention_period_secs'] = 60 * 60 * 24 * 60
 		}
@@ -220,7 +119,6 @@
 	let oauths: Record<string, any> = {}
 
 	let resourceName = ''
-	let tab: 'Core' | 'SMTP' | 'OAuth' = 'Core'
 
 	function parseDate(license_key: string): string | undefined {
 		let splitted = license_key.split('.')
@@ -251,15 +149,23 @@
 		'linkedin'
 	]
 
-	let oauth_name = 'custom'
+	let oauth_name = undefined
+
+	async function sendStats() {
+		await SettingService.sendStats()
+		sendUserToast('Usage sent')
+	}
+
+	let clientName = ''
+
+	let licenseKeyChanged = false
 </script>
 
 <div class="pb-8">
-	<Tabs bind:selected={tab}>
-		{#each Object.keys(settings) as category}
+	<Tabs {hideTabs} bind:selected={tab}>
+		{#each settingsKeys as category}
 			<Tab value={category}>{category}</Tab>
 		{/each}
-		<Tab value="oauth">SSO/OAuth</Tab>
 
 		<svelte:fragment slot="content">
 			<div class="pt-4" />
@@ -267,9 +173,193 @@
 				<TabContent value={category}>
 					{#if category == 'SMTP'}
 						<div class="text-secondary pb-4 text-xs"
-							>Setting SMTP unlock sending emails upon adding new users to the workspace or the
+							>Setting SMTP unlocks sending emails upon adding new users to the workspace or the
 							instance.</div
 						>
+					{:else if category == 'Telemetry'}
+						<div class="text-secondary pb-4 text-xs">
+							Anonymous usage data is collected to help improve Windmill.
+							<br />The following information is collected:
+							<ul class="list-disc list-inside pl-2">
+								<li>version</li>
+								<li>number and total duration of jobs</li>
+								<li>accounts usage</li>
+								<li>login type usage</li>
+								<li>workers usage</li>
+								<li>vcpus usage</li>
+							</ul>
+						</div>
+						{#if $enterpriseLicense}
+							<Button
+								on:click={sendStats}
+								variant="border"
+								color="light"
+								btnClasses="w-auto"
+								wrapperClasses="mb-4"
+								size="xs">Send usage</Button
+							>
+						{/if}
+					{/if}
+					{#if category == 'SSO/OAuth'}
+						<div class="mb-6">
+							<h4 class="pb-4">SSO</h4>
+							{#if !$enterpriseLicense || $enterpriseLicense.endsWith('_pro')}
+								<Alert type="warning" title="Limited to 10 SSO users">
+									Without EE, the number of SSO users is limited to 10. SCIM/SAML is available on EE
+								</Alert>
+							{/if}
+
+							<div class="py-1" />
+							<Alert type="info" title="Test on a separate tab">
+								The recommended workflow is to to save your oauth setting and test them directly on
+								the login or resource page
+							</Alert>
+							<div class="flex flex-col gap-2 py-4">
+								<OAuthSetting name="google" bind:value={oauths['google']} />
+								<OAuthSetting name="microsoft" bind:value={oauths['microsoft']} />
+								<OktaSetting bind:value={oauths['okta']} />
+								<OAuthSetting name="github" bind:value={oauths['github']} />
+								<OAuthSetting name="gitlab" bind:value={oauths['gitlab']} />
+								<OAuthSetting name="jumpcloud" bind:value={oauths['jumpcloud']} />
+								<KeycloakSetting bind:value={oauths['keycloak']} />
+								<AuthentikSetting bind:value={oauths['authentik']} />
+								<AutheliaSetting bind:value={oauths['authelia']} />
+								<KanidmSetting bind:value={oauths['kanidm']} />
+								<ZitadelSetting bind:value={oauths['zitadel']} />
+								{#each Object.keys(oauths) as k}
+									{#if !['authelia', 'authentik', 'google', 'microsoft', 'github', 'gitlab', 'jumpcloud', 'okta', 'keycloak', 'slack', 'kanidm', 'zitadel'].includes(k) && 'login_config' in oauths[k]}
+										{#if oauths[k]}
+											<div class="flex flex-col gap-2 pb-4">
+												<div class="flex flex-row items-center gap-2">
+													<label class="text-md font-medium text-primary">{k}</label>
+													<CloseButton
+														on:close={() => {
+															delete oauths[k]
+															oauths = { ...oauths }
+														}}
+													/>
+												</div>
+												<div class="p-2 border rounded">
+													<label class="block pb-2">
+														<span class="text-primary font-semibold text-sm">Client Id</span>
+														<input
+															type="text"
+															placeholder="Client Id"
+															bind:value={oauths[k]['id']}
+														/>
+													</label>
+													<label class="block pb-2">
+														<span class="text-primary font-semibold text-sm">Client Secret</span>
+														<input
+															type="text"
+															placeholder="Client Secret"
+															bind:value={oauths[k]['secret']}
+														/>
+													</label>
+													{#if !windmillBuiltins.includes(k) && k != 'slack'}
+														<CustomSso bind:login_config={oauths[k]['login_config']} />
+													{/if}
+												</div>
+											</div>
+										{/if}
+									{/if}
+								{/each}
+							</div>
+							<div class="flex gap-2">
+								<input type="text" placeholder="client_id" bind:value={clientName} />
+								<Button
+									variant="border"
+									color="blue"
+									hover="yo"
+									size="sm"
+									endIcon={{ icon: Plus }}
+									disabled={clientName == ''}
+									on:click={() => {
+										oauths[clientName] = { id: '', secret: '', login_config: {} }
+										clientName = ''
+									}}
+								>
+									Add custom SSO client {!$enterpriseLicense ? '(requires ee)' : ''}
+								</Button>
+							</div>
+							<h4 class="py-4">OAuth</h4>
+							<Alert type="info" title="Require a corresponding resource type">
+								After setting an oauth client, make sure that there is a corresponding resource type
+								with the same name with a "token" field in the admins workspace.
+							</Alert>
+							<div class="py-1" />
+							<OAuthSetting login={false} name="slack" bind:value={oauths['slack']} />
+							<div class="py-1" />
+
+							{#each Object.keys(oauths) as k}
+								{#if !['authelia', 'authentik', 'google', 'microsoft', 'github', 'gitlab', 'jumpcloud', 'okta', 'keycloak', 'slack', 'kanidm', 'zitadel'].includes(k) && !('login_config' in oauths[k])}
+									{#if oauths[k]}
+										<div class="flex flex-col gap-2 pb-4">
+											<div class="flex flex-row items-center gap-2">
+												<label class="text-md font-medium text-primary">{k}</label>
+												<CloseButton
+													on:close={() => {
+														delete oauths[k]
+														oauths = { ...oauths }
+													}}
+												/>
+											</div>
+											<div class="p-2 border rounded">
+												<label class="block pb-2">
+													<span class="text-primary font-semibold text-sm">Client Id</span>
+													<input type="text" placeholder="Client Id" bind:value={oauths[k]['id']} />
+												</label>
+												<label class="block pb-2">
+													<span class="text-primary font-semibold text-sm">Client Secret</span>
+													<input
+														type="text"
+														placeholder="Client Secret"
+														bind:value={oauths[k]['secret']}
+													/>
+												</label>
+												{#if !windmillBuiltins.includes(k) && k != 'slack'}
+													<CustomOauth bind:connect_config={oauths[k]['connect_config']} />
+												{/if}
+											</div>
+										</div>
+									{/if}
+								{/if}
+							{/each}
+
+							<div class="flex gap-2">
+								<select name="oauth_name" id="oauth_name" bind:value={oauth_name}>
+									<option value={undefined}>Select an OAuth client</option>
+									<option value="custom">Fully Custom (requires ee)</option>
+									{#each windmillBuiltins as name}
+										<option value={name}>{capitalize(name)}</option>
+									{/each}
+								</select>
+								{#if oauth_name == 'custom'}
+									<input type="text" placeholder="client_id" bind:value={resourceName} />
+								{:else}
+									<input type="text" value={oauth_name ?? ''} disabled />
+								{/if}
+								<Button
+									variant="border"
+									color="blue"
+									hover="yo"
+									size="sm"
+									endIcon={{ icon: Plus }}
+									disabled={!oauth_name ||
+										(oauth_name == 'custom' && resourceName == '') ||
+										(oauth_name == 'custom' && !$enterpriseLicense)}
+									on:click={() => {
+										let name = oauth_name == 'custom' ? resourceName : oauth_name
+										oauths[name ?? ''] = { id: '', secret: '' }
+										resourceName = ''
+									}}
+								>
+									Add OAuth client {oauth_name == 'custom' && !$enterpriseLicense
+										? '(requires ee)'
+										: ''}
+								</Button>
+							</div>
+						</div>
 					{/if}
 					<div>
 						<div class="flex-col flex gap-2 pb-4">
@@ -297,7 +387,7 @@
 													type="text"
 													placeholder={setting.placeholder}
 													class={hasError
-														? 'border !border-red-700 !border-opacity-30 !focus:border-red-700 !focus:border-opacity-30 !bg-red-100'
+														? 'border !border-red-700 !border-opacity-30 !focus:border-red-700 !focus:border-opacity-30'
 														: ''}
 													bind:value={values[setting.key]}
 												/>
@@ -312,6 +402,9 @@
 													<textarea
 														rows="2"
 														placeholder={setting.placeholder}
+														on:keydown={() => {
+															licenseKeyChanged = true
+														}}
 														bind:value={values[setting.key]}
 													/>
 													<Button
@@ -331,6 +424,12 @@
 															>License key expires on {parseDate(values[setting.key])}</span
 														>
 													{/if}
+												{/if}
+												{#if licenseKeyChanged}
+													<div class="text-yellow-600"
+														>Refresh page after setting license key and saving to unlock all
+														features</div
+													>
 												{/if}
 											{:else if setting.fieldType == 'email'}
 												<input
@@ -362,8 +461,7 @@
 
 											{#if hasError}
 												<span class="text-red-500 text-xs">
-													Base url must start with http:// or https:// and must not end with a
-													trailing slash.
+													{setting.error ?? ''}
 												</span>
 											{/if}
 										{:else}
@@ -400,104 +498,6 @@
 					{/if}
 				</TabContent>
 			{/each}
-			<TabContent value={'oauth'}>
-				<div>
-					<h4 class="pb-4">SSO</h4>
-					{#if !$enterpriseLicense}
-						<Alert type="warning" title="Limited to 50 SSO users">
-							Without EE, the number of SSO users is limited to 50. SCIM/SAML is available on EE
-						</Alert>
-					{/if}
-
-					<div class="py-1" />
-					<Alert type="info" title="Test on a separate tab">
-						The recommended workflow is to to save your oauth setting and test them directly on the
-						login or resource page
-					</Alert>
-					<div class="flex flex-col gap-2 py-4">
-						<OAuthSetting name="google" bind:value={oauths['google']} />
-						<OAuthSetting name="microsoft" bind:value={oauths['microsoft']} />
-						<OktaSetting bind:value={oauths['okta']} />
-						<OAuthSetting name="github" bind:value={oauths['github']} />
-						<OAuthSetting name="gitlab" bind:value={oauths['gitlab']} />
-						<OAuthSetting name="jumpcloud" bind:value={oauths['jumpcloud']} />
-						<KeycloakSetting bind:value={oauths['keycloak']} />
-					</div>
-					<h4 class="py-4">OAuth</h4>
-					<Alert type="info" title="Require a corresponding resource type">
-						After setting an oauth client, make sure that there is a corresponding resource type
-						with the same name with a "token" field in the admins workspace.
-					</Alert>
-					<div class="py-1" />
-					<OAuthSetting login={false} name="slack" bind:value={oauths['slack']} />
-					<div class="py-1" />
-
-					{#each Object.keys(oauths) as k}
-						{#if !['google', 'microsoft', 'github', 'gitlab', 'jumpcloud', 'okta', 'keycloak', 'slack'].includes(k)}
-							{#if oauths[k]}
-								<div class="flex flex-col gap-2 pb-4">
-									<div class="flex flex-row items-center gap-2">
-										<label class="text-md font-medium text-primary">{k}</label>
-										<CloseButton
-											on:close={() => {
-												delete oauths[k]
-												oauths = { ...oauths }
-											}}
-										/>
-									</div>
-									<div class="p-2 border rounded">
-										<label class="block pb-2">
-											<span class="text-primary font-semibold text-sm">Client Id</span>
-											<input type="text" placeholder="Client Id" bind:value={oauths[k]['id']} />
-										</label>
-										<label class="block pb-2">
-											<span class="text-primary font-semibold text-sm">Client Secret</span>
-											<input
-												type="text"
-												placeholder="Client Secret"
-												bind:value={oauths[k]['secret']}
-											/>
-										</label>
-										{#if !windmillBuiltins.includes(k) && k != 'slack'}
-											<CustomOauth bind:connect_config={oauths[k]['connect_config']} />
-										{/if}
-									</div>
-								</div>
-							{/if}
-						{/if}
-					{/each}
-
-					<div class="flex gap-2">
-						<select name="oauth_name" id="oauth_name" bind:value={oauth_name}>
-							<option value="custom">Fully Custom (require ee)</option>
-							{#each windmillBuiltins as name}
-								<option value={name}>{capitalize(name)}</option>
-							{/each}
-						</select>
-						{#if oauth_name == 'custom'}
-							<input type="text" placeholder="client_id" bind:value={resourceName} />
-						{:else}
-							<input type="text" value={oauth_name} disabled />
-						{/if}
-						<Button
-							variant="border"
-							color="blue"
-							hover="yo"
-							size="sm"
-							endIcon={{ icon: faPlus }}
-							disabled={(oauth_name == 'custom' && resourceName == '') ||
-								(oauth_name == 'custom' && !$enterpriseLicense)}
-							on:click={() => {
-								let name = oauth_name == 'custom' ? resourceName : oauth_name
-								oauths[name] = { id: '', secret: '' }
-								resourceName = ''
-							}}
-						>
-							Add OAuth client {oauth_name == 'custom' && !$enterpriseLicense ? '(require ee)' : ''}
-						</Button>
-					</div>
-				</div>
-			</TabContent>
 		</svelte:fragment>
 	</Tabs>
 </div>

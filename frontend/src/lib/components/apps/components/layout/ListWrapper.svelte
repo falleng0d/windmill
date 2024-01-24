@@ -6,20 +6,19 @@
 	export let index: number
 	export let value: any
 	export let disabled = false
-	export let inputs: Record<string, Record<number, any>> = {}
-	export let onInputsChange: () => void
-
+	export let onSet: ((id: string, value: any) => void) | undefined = undefined
+	export let onRemove: ((id: string) => void) | undefined = undefined
 	const ctx = writable({ index, value, disabled })
 
 	$: $ctx = { index, value, disabled }
 	setContext<ListContext>('ListWrapperContext', ctx)
-	setContext<ListInputs>('ListInputs', (id: string, value: any) => {
-		if (!inputs[id]) {
-			inputs[id] = { [index]: value }
-		} else {
-			inputs[id][index] = value
+	setContext<ListInputs>('ListInputs', {
+		set: (id: string, value: any) => {
+			onSet?.(id, value)
+		},
+		remove(id) {
+			onRemove?.(id)
 		}
-		onInputsChange()
 	})
 </script>
 

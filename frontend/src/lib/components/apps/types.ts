@@ -75,7 +75,7 @@ export type RichConfigurations = Record<string, RichConfiguration>
 
 export type StaticRichConfigurations = Record<
 	string,
-	RichConfigurationT<GeneralAppInput & (StaticAppInput | EvalAppInput)>
+	RichConfigurationT<GeneralAppInput & (StaticAppInput | EvalAppInput | EvalV2AppInput)>
 >
 
 export interface BaseAppComponent extends Partial<Aligned> {
@@ -173,7 +173,7 @@ export type ListContext = Writable<{
 	disabled: boolean
 }>
 
-export type ListInputs = (id: string, value: any) => void
+export type ListInputs = { set: (id: string, value: any) => void; remove: (id: string) => void }
 
 export type GroupContext = Writable<Record<string, any>>
 
@@ -189,13 +189,14 @@ export type AppViewerContext = {
 	mode: Writable<EditorMode>
 	connectingInput: Writable<ConnectingInput>
 	breakpoint: Writable<EditorBreakpoint>
+	bgRuns: Writable<string[]>
 	runnableComponents: Writable<
 		Record<
 			string,
 			{
 				autoRefresh: boolean
 				refreshOnStart?: boolean
-				cb: ((inlineScript?: InlineScript) => CancelablePromise<void>)[]
+				cb: ((inlineScript?: InlineScript, setRunnableJob?: boolean) => CancelablePromise<void>)[]
 			}
 		>
 	>
@@ -204,19 +205,25 @@ export type AppViewerContext = {
 	workspace: string
 	onchange: (() => void) | undefined
 	isEditor: boolean
-	jobs: Writable<string[]>,
+	jobs: Writable<string[]>
 	// jobByComponent: Writable<Record<string, string>>,
-	jobsById: Writable<Record<string, 		{
-		job: string
-		component: string
-		result?: string
-		error?: any
-		transformer?: { result?: string; error?: string }
-		started_at?: number
-		duration_ms?: number
-	}>>,
+	jobsById: Writable<
+		Record<
+			string,
+			{
+				job: string
+				component: string
+				result?: string
+				error?: any
+				transformer?: { result?: string; error?: string }
+				created_at?: number
+				started_at?: number
+				duration_ms?: number
+			}
+		>
+	>
 	noBackend: boolean
-	errorByComponent: Writable<Record<string, {id?: string, error: string}>>
+	errorByComponent: Writable<Record<string, { id?: string; error: string }>>
 	openDebugRun: Writable<((jobID: string) => void) | undefined>
 	focusedGrid: Writable<FocusedGrid | undefined>
 	stateId: Writable<number>
@@ -238,6 +245,10 @@ export type AppViewerContext = {
 				closeModal?: () => void
 				open?: () => void
 				close?: () => void
+				validate?: (key: string) => void
+				invalidate?: (key: string, error: string) => void
+				validateAll?: () => void
+				clearFiles?: () => void
 			}
 		>
 	>
@@ -249,6 +260,17 @@ export type AppViewerContext = {
 }
 
 export type AppEditorContext = {
+	yTop: Writable<number>
+	runnableJobEditorPanel: Writable<{
+		focused: boolean
+		jobs: Record<string, string>
+		frontendJobs: Record<string, any>
+		width: number
+	}>
+	evalPreview: Writable<Record<string, any>>
+	componentActive: Writable<boolean>
+	dndItem: Writable<Record<string, (x: number, y: number, topY: number) => void>>
+	refreshComponents: Writable<(() => void) | undefined>
 	history: History<App> | undefined
 	pickVariableCallback: Writable<((path: string) => void) | undefined>
 	selectedComponentInEditor: Writable<string | undefined>

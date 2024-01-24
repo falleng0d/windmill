@@ -1,43 +1,47 @@
 <script lang="ts">
 	import { Button } from '$lib/components/common'
-	import { InputService, type Input, RunnableType, type CreateInput } from '$lib/gen/index.js'
+	import { InputService, type Input, RunnableType, type CreateInput, Job } from '$lib/gen/index.js'
 	import { userStore, workspaceStore } from '$lib/stores.js'
 	import { classNames, displayDate, sendUserToast } from '$lib/utils.js'
-	import { faSave } from '@fortawesome/free-solid-svg-icons'
 	import { createEventDispatcher } from 'svelte'
 	import { Pane, Splitpanes } from 'svelte-splitpanes'
 	import ObjectViewer from './propertyPicker/ObjectViewer.svelte'
-	import { ArrowLeftIcon, Edit, ExternalLink, X } from 'lucide-svelte'
+	import { ArrowLeftIcon, Edit, ExternalLink, Save, X } from 'lucide-svelte'
 	import Toggle from './Toggle.svelte'
 	import Tooltip from './Tooltip.svelte'
 	import TimeAgo from './TimeAgo.svelte'
+	import JobLoader from './runs/JobLoader.svelte'
 
 	export let scriptHash: string | null = null
 	export let scriptPath: string | null = null
 	export let flowPath: string | null = null
 	export let canSaveInputs: boolean = true
 
-	let runnableId: string | undefined = scriptPath || flowPath || undefined
-	let runnableType: RunnableType | undefined = scriptHash
+	// Are the current Inputs valid and able to be saved?
+	export let isValid: boolean
+	export let args: object
+
+	interface EditableInput extends Input {
+		isEditing?: boolean
+		isSaving?: boolean
+	}
+
+	let previousInputs: Input[] = []
+	let savedInputs: EditableInput[] = []
+	let selectedInput: Input | null
+	let jobs: Job[] = []
+	let loading: boolean = false
+	let savingInputs = false
+	const dispatch = createEventDispatcher()
+
+	$: runnableId = scriptPath || flowPath || undefined
+	$: runnableType = scriptHash
 		? RunnableType.SCRIPT_HASH
 		: scriptPath
 		? RunnableType.SCRIPT_PATH
 		: flowPath
 		? RunnableType.FLOW_PATH
 		: undefined
-
-	// Are the current Inputs valid and able to be saved?
-	export let isValid: boolean
-	export let args: object
-
-	let previousInputs: Input[] = []
-	interface EditableInput extends Input {
-		isEditing?: boolean
-		isSaving?: boolean
-	}
-	let savedInputs: EditableInput[] = []
-
-	let selectedInput: Input | null
 
 	async function loadInputHistory() {
 		previousInputs = await InputService.getInputHistory({
@@ -56,8 +60,6 @@
 			perPage: 10
 		})
 	}
-
-	let savingInputs = false
 
 	async function saveInput(args: object) {
 		savingInputs = true
@@ -128,25 +130,40 @@
 	}
 
 	$: {
-		if ($workspaceStore && (scriptHash || scriptPath || flowPath)) {
+		if ($workspaceStore && jobs && (scriptHash || scriptPath || flowPath)) {
+			console.log('loading inputs')
 			loadInputHistory()
 			loadSavedInputs()
 		}
 	}
 
-	const dispatch = createEventDispatcher()
-
-	const selectArgs = (selected_args: any) => {
+	function selectArgs(selected_args: any) {
 		dispatch('selected_args', selected_args)
 	}
 </script>
+
+<JobLoader
+	bind:jobs
+	path={runnableId ?? null}
+	isSkipped={false}
+	jobKindsCat="jobs"
+	jobKinds="all"
+	user={null}
+	folder={null}
+	success="running"
+	argFilter={undefined}
+	bind:loading
+	synUrl={false}
+	syncQueuedRunsCount={false}
+	refreshRate={10000}
+/>
 
 <div class="min-w-[300px] h-full">
 	<Splitpanes horizontal={true}>
 		<Pane>
 			<div class="w-full flex flex-col gap-4 p-2">
 				<div class="w-full flex justify-between items-center gap-4 flex-wrap">
-					<span class="text-sm font-extrabold flex-shrink-0"
+					<span class="text-sm font-semibold flex-shrink-0"
 						>Saved Inputs <Tooltip
 							>Shared inputs are available to anyone with access to the script</Tooltip
 						></span
@@ -156,7 +173,7 @@
 							on:click={() => saveInput(args)}
 							disabled={!isValid}
 							loading={savingInputs}
-							startIcon={{ icon: faSave }}
+							startIcon={{ icon: Save }}
 							color="light"
 							size="xs"
 						>
@@ -261,11 +278,52 @@
 
 		<Pane>
 			<div class="w-full flex flex-col gap-4 p-2">
-				<span class="text-sm font-extrabold">Previous runs</span>
+				<span class="text-sm font-semibold">Previous runs</span>
+
+				<div class="w-full flex flex-col gap-1 p-0 h-full overflow-y-auto">
+					{#if jobs.length > 0}
+						{#each jobs as i (i.id)}
+							<button
+								class={classNames(
+									`w-full flex items-center justify-between gap-4 py-2 px-4 text-left border rounded-sm hover:bg-surface-hover transition-a`,
+									'border-orange-400'
+								)}
+							>
+								<div
+									class="w-full h-full items-center text-xs font-normal grid grid-cols-8 gap-4 min-w-0"
+								>
+									<div class="">
+										<div class="rounded-full w-2 h-2 bg-orange-400 animate-pulse" />
+									</div>
+									<div class="col-span-2">
+										{i.created_by}
+									</div>
+									<div
+										class="whitespace-nowrap col-span-3 !text-tertiary !text-2xs overflow-hidden text-ellipsis flex-shrink text-center"
+									>
+										<TimeAgo date={i.created_at ?? ''} />
+									</div>
+									<div class="col-span-2">
+										<a
+											target="_blank"
+											href="/run/{i.id}?workspace={$workspaceStore}"
+											class="text-right float-right text-secondary"
+											title="See run detail in a new tab"
+										>
+											<ExternalLink size={16} />
+										</a>
+									</div>
+								</div>
+							</button>
+						{/each}
+					{:else}
+						<div class="text-left text-tertiary text-xs">No running runs</div>
+					{/if}
+				</div>
 
 				<div class="w-full flex flex-col gap-1 p-0 h-full overflow-y-auto">
 					{#if previousInputs.length > 0}
-						{#each previousInputs as i}
+						{#each previousInputs as i (i.id)}
 							<button
 								class={classNames(
 									`w-full flex items-center justify-between gap-4 py-2 px-4 text-left border rounded-sm hover:bg-surface-hover transition-a`,
@@ -289,7 +347,7 @@
 										{i.created_by}
 									</div>
 									<div
-										class="whitespace-nowrap col-span-3 font-normal overflow-hidden text-ellipsis flex-shrink text-center"
+										class="whitespace-nowrap col-span-3 !text-tertiary !text-2xs overflow-hidden text-ellipsis flex-shrink text-center"
 									>
 										<TimeAgo date={i.created_at ?? ''} />
 									</div>
@@ -316,7 +374,7 @@
 		<Pane>
 			<div class="h-full overflow-hidden min-h-0 flex flex-col justify-between">
 				<div class="w-full flex flex-col min-h-0 gap-2 px-2 py-2 grow">
-					<div class="text-sm font-extrabold">Preview</div>
+					<div class="text-sm font-semibold">Preview</div>
 					<div class="w-full flex flex-col">
 						<Button
 							color="blue"
@@ -332,7 +390,7 @@
 					</div>
 					<div class="w-full min-h-0 grow overflow-auto">
 						{#if Object.keys(selectedInput?.args || {}).length > 0}
-							<div class="border overflow-auto h-full p-2">
+							<div class=" overflow-auto h-full p-2">
 								<ObjectViewer json={selectedInput?.args} />
 							</div>
 						{:else}

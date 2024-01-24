@@ -150,10 +150,27 @@
 						{#each result ?? [] as value, index}
 							<div class="overflow-auto w-full">
 								<ListWrapper
-									onInputsChange={() => {
+									onSet={(id, value) => {
+										if (!inputs[id]) {
+											inputs[id] = { [index]: value }
+										} else {
+											inputs[id] = { ...inputs[id], [index]: value }
+										}
 										outputs?.inputs.set(inputs, true)
 									}}
-									bind:inputs
+									onRemove={(id) => {
+										if (inputs?.[id] == undefined) {
+											return
+										}
+										if (index == 0) {
+											delete inputs[id]
+											inputs = { ...inputs }
+										} else {
+											delete inputs[id][index]
+											inputs[id] = { ...inputs[id] }
+										}
+										outputs?.inputs.set(inputs, true)
+									}}
 									{value}
 									{index}
 								>
@@ -177,7 +194,7 @@
 					</Carousel>
 				{/key}
 			{:else}
-				<ListWrapper onInputsChange={() => {}} disabled value={undefined} index={0}>
+				<ListWrapper disabled value={undefined} index={0}>
 					<SubGridEditor visible={false} {id} subGridId={`${id}-0`} />
 				</ListWrapper>
 				{#if !Array.isArray(result)}

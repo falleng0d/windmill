@@ -2,11 +2,17 @@
 	import { Highlight } from 'svelte-highlight'
 	import { json } from 'svelte-highlight/languages'
 	import TableCustom from './TableCustom.svelte'
-	import { copyToClipboard, roughSizeOfObject, truncate } from '$lib/utils'
+	import { copyToClipboard, emptyString, roughSizeOfObject, truncate } from '$lib/utils'
 	import { Button, Drawer, DrawerContent } from './common'
-	import { ClipboardCopy, Download, Expand } from 'lucide-svelte'
+	import { ClipboardCopy, Download, Expand, PanelRightOpen, Table2 } from 'lucide-svelte'
 	import Portal from 'svelte-portal'
 	import ObjectViewer from './propertyPicker/ObjectViewer.svelte'
+	import S3FilePicker from './S3FilePicker.svelte'
+	import Alert from './common/alert/Alert.svelte'
+	import AutoDataTable from './table/AutoDataTable.svelte'
+	import Markdown from 'svelte-exmarkdown'
+	import { HelpersService } from '$lib/gen'
+	import { workspaceStore } from '$lib/stores'
 
 	export let result: any
 	export let requireHtmlApproval = false
@@ -28,6 +34,10 @@
 		| 'approval'
 		| 'svg'
 		| 'filename'
+		| 's3object'
+		| 's3object-list'
+		| 'plain'
+		| 'markdown'
 		| undefined
 
 	$: resultKind = inferResultKind(result)
@@ -61,39 +71,47 @@
 		return keys.map((k) => Array.isArray(result[k])).reduce((a, b) => a && b)
 	}
 
-	let largeObject: undefined | boolean = undefined
+	let largeObject: boolean | undefined = undefined
 
 	function inferResultKind(result: any) {
-		largeObject = undefined
-
 		if (result == 'WINDMILL_TOO_BIG') {
 			largeObject = true
 			return 'json'
 		}
-		let length = roughSizeOfObject(result)
-		largeObject = length > 10000
 
-		if (largeObject) {
-			return 'json'
-		}
-
-		if (result) {
+		if (result !== undefined) {
 			try {
 				let keys = Object.keys(result)
-				if (isRectangularArray(result)) {
+
+				// Check if the result is an image
+				if (['png', 'svg', 'jpeg'].includes(keys[0]) && keys.length == 1) {
+					// Check if the image is too large (10mb)
+					largeObject = roughSizeOfObject(result) > 10000000
+
+					return keys[0] as 'png' | 'svg' | 'jpeg'
+				}
+
+				let length = roughSizeOfObject(result)
+				// Otherwise, check if the result is too large (10kb) for json
+				largeObject = length > 10000
+
+				if (largeObject) {
+					return 'json'
+				}
+
+				if ((keys.length == 1 && keys[0] == 'table-row') || isRectangularArray(result)) {
 					return 'table-row'
-				} else if (isObjectOfArray(result, keys)) {
+				} else if ((keys.length == 1 && keys[0] == 'table-col') || isObjectOfArray(result, keys)) {
 					return 'table-col'
 				} else if (keys.length == 1 && keys[0] == 'html') {
 					return 'html'
-				} else if (keys.length == 1 && keys[0] == 'png') {
-					return 'png'
-				} else if (keys.length == 1 && keys[0] == 'svg') {
-					return 'svg'
-				} else if (keys.length == 1 && keys[0] == 'jpeg') {
-					return 'jpeg'
 				} else if (keys.length == 1 && keys[0] == 'file') {
 					return 'file'
+				} else if (
+					keys.includes('windmill_content_type') &&
+					result['windmill_content_type'].startsWith('text/')
+				) {
+					return 'plain'
 				} else if (keys.length == 1 && keys[0] == 'error') {
 					return 'error'
 				} else if (keys.length === 2 && keys.includes('file') && keys.includes('filename')) {
@@ -114,12 +132,20 @@
 					}
 					return 'file'
 				} else if (
-					keys.length == 3 &&
 					keys.includes('resume') &&
 					keys.includes('cancel') &&
 					keys.includes('approvalPage')
 				) {
 					return 'approval'
+				} else if (keys.length === 1 && keys.includes('s3')) {
+					return 's3object'
+				} else if (
+					Array.isArray(result) &&
+					result.every((elt) => inferResultKind(elt) === 's3object')
+				) {
+					return 's3object-list'
+				} else if (keys.length === 1 && (keys.includes('md') || keys.includes('markdown'))) {
+					return 'markdown'
 				}
 			} catch (err) {}
 		}
@@ -127,9 +153,10 @@
 	}
 
 	let jsonViewer: Drawer
+	let s3FileViewer: S3FilePicker
 
 	function toJsonStr(result: any) {
-		return JSON.stringify(result, null, 4)
+		return JSON.stringify(result ?? null, null, 4) ?? 'null'
 	}
 
 	function contentOrRootString(obj: string | { filename: string; content: string }) {
@@ -139,52 +166,94 @@
 			return obj.content
 		}
 	}
+
+	function isArrayWithObjects(json) {
+		return (
+			Array.isArray(json) &&
+			json.length > 0 &&
+			json.every((item) => typeof item === 'object' && Object.keys(item).length > 0)
+		)
+	}
+
+	$: isTableDisplay = isArrayWithObjects(result)
+	let richRender: boolean = true
+
+	type InputObject = { [key: string]: number[] }
+
+	function transform(input: InputObject): any[] {
+		const maxLength = Math.max(...Object.values(input).map((arr) => arr.length))
+		const result: Array<{
+			[key: string]: number | null
+		}> = []
+
+		for (let i = 0; i < maxLength; i++) {
+			const obj: { [key: string]: number | null } = {}
+
+			for (const key of Object.keys(input)) {
+				if (i < input[key].length) {
+					obj[key] = input[key][i]
+				} else {
+					obj[key] = null
+				}
+			}
+
+			result.push(obj)
+		}
+
+		return result
+	}
+
+	async function downloadS3File(fileKey: string | undefined) {
+		if (emptyString(fileKey)) {
+			return
+		}
+		const downloadUrl = await HelpersService.generateDownloadUrl({
+			workspace: $workspaceStore!,
+			fileKey: fileKey!
+		})
+		console.log('download URL ', downloadUrl.download_url)
+		window.open(downloadUrl.download_url, '_blank')
+	}
 </script>
 
-<div class="inline-highlight relative grow min-h-[200px] h-full">
-	{#if result != undefined && length != undefined && largeObject != undefined}{#if resultKind && resultKind != 'json'}<div
-				class="top-0 flex flex-row w-full justify-between items-center"
+<div class="inline-highlight relative grow min-h-[200px]">
+	{#if result != undefined && length != undefined && largeObject != undefined}
+		{#if resultKind && !['json', 's3object', 's3object-list'].includes(resultKind)}
+			<div class="top-1 absolute flex flex-row w-full justify-between items-center"
 				><div class="mb-2 text-tertiary text-sm">
 					as JSON&nbsp;<input class="windmillapp" type="checkbox" bind:checked={forceJson} /></div
-				>
-				<slot name="copilot-fix" />
-			</div>
-		{/if}{#if typeof result == 'object' && Object.keys(result).length > 0}<div
-				class="top-0 mb-2 w-full min-w-[400px] text-sm relative"
+				><slot name="copilot-fix" />
+			</div><div
+				class="py-3"
+			/>{/if}{#if typeof result == 'object' && Object.keys(result).length > 0}<div
+				class="top-1 mb-2 w-full min-w-[400px] text-sm absolute"
 				>{#if !disableExpand}
-					<div class="text-tertiary text-xs absolute top-5.5 right-0 inline-flex gap-2">
+					<div class="text-tertiary text-xs absolute top-5.5 right-0 inline-flex gap-2 z-10">
 						<button on:click={() => copyToClipboard(toJsonStr(result))}
 							><ClipboardCopy size={16} /></button
 						>
 						<button on:click={jsonViewer.openDrawer}><Expand size={16} /></button>
-					</div>
-				{/if}</div
-			>{/if}{#if !forceJson && resultKind == 'table-col'}<div
-				class="grid grid-flow-col-dense border rounded-md"
-			>
-				{#each Object.keys(result) as col}
-					<div class="flex flex-col max-h-40 min-w-full">
-						<div
-							class="px-12 text-left uppercase border-b bg-surface-secondary overflow-hidden rounded-t-md"
-						>
-							{col}
-						</div>
-						{#if Array.isArray(result[col])}
-							{#each result[col] as item}
-								<div class="px-12 text-left text-xs whitespace-nowrap overflow-auto pb-2">
-									{typeof item === 'string' ? item : JSON.stringify(item)}
-								</div>
-							{/each}
+						{#if isTableDisplay}
+							<button
+								aria-label="Render as table"
+								on:click={() => {
+									richRender = !richRender
+								}}
+							>
+								<Table2 size={16} class={richRender ? 'text-blue-500' : ''} /></button
+							>
 						{/if}
 					</div>
-				{/each}
-			</div>
-		{:else if !forceJson && resultKind == 'table-row'}<div
-				class="grid grid-flow-col-dense border border-gray-200"
-			>
+				{/if}</div
+			>{/if}{#if !forceJson && resultKind == 'table-col'}
+			{@const data = 'table-col' in result ? result['table-col'] : result}
+			<AutoDataTable objects={transform(data)} />
+		{:else if !forceJson && resultKind == 'table-row'}
+			{@const data = 'table-row' in result ? result['table-row'] : result}
+			<div class="grid grid-flow-col-dense border border-gray-200">
 				<TableCustom>
 					<tbody slot="body">
-						{#each asListOfList(result) as row}
+						{#each Array.isArray(asListOfList(data)) ? asListOfList(data) : [] as row}
 							<tr>
 								{#each row as v}
 									<td class="!text-xs">{truncate(JSON.stringify(v), 200) ?? ''}</td>
@@ -251,9 +320,13 @@
 					src="data:image/gif;base64,{contentOrRootString(result.gif)}"
 				/>
 			</div>
+		{:else if !forceJson && resultKind == 'plain'}
+			<div class="h-full text-2xs">
+				<pre>{result?.['result']}</pre>
+			</div>
 		{:else if !forceJson && resultKind == 'file'}
-			<div
-				><a
+			<div>
+				<a
 					download={result.filename ?? result.file?.filename ?? 'windmill.file'}
 					href="data:application/octet-stream;base64,{contentOrRootString(result.file)}">Download</a
 				>
@@ -267,7 +340,7 @@
 				<pre class="text-sm whitespace-pre-wrap text-primary">{result.error.stack ?? ''}</pre>
 				<slot />
 			</div>
-		{:else if !forceJson && resultKind == 'approval'}<div class="flex flex-col gap-3 mt-8 mx-4">
+		{:else if !forceJson && resultKind == 'approval'}<div class="flex flex-col gap-3 mt-2 mx-4">
 				<Button
 					color="green"
 					variant="border"
@@ -286,15 +359,86 @@
 					><a rel="noreferrer" target="_blank" href={result['approvalPage']}>Approval Page</a></div
 				>
 			</div>
-		{:else if largeObject}<div class="text-sm text-tertiary"
-				><a
-					download="{filename ?? 'result'}.json"
-					href={workspaceId && jobId
-						? `/api/w/${workspaceId}/jobs_u/completed/get_result/${jobId}`
-						: `data:text/json;charset=utf-8,${encodeURIComponent(toJsonStr(result))}`}>Download</a
-				>
+		{:else if !forceJson && resultKind == 's3object'}
+			<div class="absolute top-1 h-full w-full">
+				<Highlight class="" language={json} code={toJsonStr(result).replace(/\\n/g, '\n')} />
+				<button
+					class="text-secondary underline text-2xs whitespace-nowrap"
+					on:click={() => {
+						downloadS3File(result?.s3)
+					}}
+					><span class="flex items-center gap-1"><Download size={12} />download</span>
+				</button>
+				<button
+					class="text-secondary underline text-2xs whitespace-nowrap"
+					on:click={() => {
+						s3FileViewer?.open?.(result)
+					}}
+					><span class="flex items-center gap-1"><PanelRightOpen size={12} />open preview</span>
+				</button>
 			</div>
-			<div class="mb-21">JSON is too large to be displayed in full</div>
+		{:else if !forceJson && resultKind == 's3object-list'}
+			<div class="absolute top-1 h-full w-full">
+				{#each result as s3object}
+					<Highlight class="" language={json} code={toJsonStr(s3object).replace(/\\n/g, '\n')} />
+					<button
+						class="text-secondary underline text-2xs whitespace-nowrap"
+						on:click={() => {
+							downloadS3File(result?.s3)
+						}}
+						><span class="flex items-center gap-1"><Download size={12} />download</span>
+					</button>
+					<button
+						class="text-secondary text-2xs whitespace-nowrap"
+						on:click={() => {
+							s3FileViewer?.open?.(s3object)
+						}}
+						><span class="flex items-center gap-1"><PanelRightOpen size={12} />open preview</span>
+					</button>
+				{/each}
+			</div>
+		{:else if !forceJson && resultKind == 'markdown'}
+			<div class="prose dark:prose-invert">
+				<Markdown md={result?.md ?? result?.markdown} />
+			</div>
+		{:else if !forceJson && isTableDisplay && richRender}
+			<AutoDataTable objects={result} />
+		{:else if largeObject}
+			{#if typeof result == 'object' && 'filename' in result && 'file' in result}
+				<div
+					><a
+						download={result.filename ?? result.file?.filename ?? 'windmill.file'}
+						href="data:application/octet-stream;base64,{contentOrRootString(result.file)}"
+						>Download</a
+					>
+				</div>
+			{:else}
+				<div class="text-sm text-tertiary"
+					><a
+						download="{filename ?? 'result'}.json"
+						href={workspaceId && jobId
+							? `/api/w/${workspaceId}/jobs_u/completed/get_result/${jobId}`
+							: `data:text/json;charset=utf-8,${encodeURIComponent(toJsonStr(result))}`}
+					>
+						Download {filename ? '' : 'as JSON'}
+					</a>
+				</div>
+
+				<div class="my-4">
+					<Alert size="xs" title="Large file detected" type="warning">
+						We recommend using persistent storage for large data files.
+						<a
+							href="https://www.windmill.dev/docs/core_concepts/persistent_storage#large-data-files-s3-r2-minio"
+							target="_blank"
+							rel="noreferrer"
+							class="hover:underline"
+						>
+							See docs for setting up an object storage service integration using s3 or any other s3
+							compatible services
+						</a>
+					</Alert>
+				</div>
+			{/if}
 			{#if result && result != 'WINDMILL_TOO_BIG'}
 				<ObjectViewer json={result} />
 			{/if}
@@ -307,7 +451,7 @@
 			</div>
 		{:else}
 			<Highlight
-				class={forceJson ? '' : 'absolute top-1 h-full'}
+				class={forceJson ? '' : 'absolute top-1 h-full w-full'}
 				language={json}
 				code={toJsonStr(result).replace(/\\n/g, '\n')}
 			/>
@@ -357,5 +501,9 @@
 				{/if}
 			</DrawerContent>
 		</Drawer>
+	</Portal>
+
+	<Portal>
+		<S3FilePicker bind:this={s3FileViewer} readOnlyMode={true} />
 	</Portal>
 {/if}

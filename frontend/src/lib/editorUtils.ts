@@ -2,20 +2,17 @@ import { languages } from 'monaco-editor/esm/vs/editor/editor.api'
 import type { editor } from 'monaco-editor/esm/vs/editor/editor.api'
 
 export function editorConfig(
-	model: any,
 	code: string,
 	lang: string,
 	automaticLayout: boolean,
 	fixedOverflowWidgets: boolean
 ): editor.IStandaloneEditorConstructionOptions {
 	return {
-		model,
 		value: code,
 		language: lang,
 		automaticLayout,
 		readOnly: false,
 		fixedOverflowWidgets,
-		autoDetectHighContrast: true,
 		//lineNumbers: 'off',
 		lineDecorationsWidth: 15,
 		lineNumbersMinChars: 2,
@@ -51,7 +48,7 @@ export function createHash() {
 export function langToExt(lang: string): string {
 	switch (lang) {
 		case 'javascript':
-			return 'js'
+			return 'ts'
 		case 'json':
 			return 'json'
 		case 'sql':

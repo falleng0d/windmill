@@ -559,6 +559,7 @@ export const quickStyleProperties: Record<
 		container: containerDefaultProps,
 		button: buttonDefaultProps
 	},
+	customcomponent: {},
 	htmlcomponent: {
 		container: [
 			layoutGrouping,
@@ -629,6 +630,7 @@ export const quickStyleProperties: Record<
 		container: containerDefaultProps
 	},
 	plotlycomponent: {},
+	plotlycomponentv2: {},
 	selectcomponent: {
 		input: inputDefaultProps
 	},
@@ -673,7 +675,16 @@ export const quickStyleProperties: Record<
 	piechartcomponent: {
 		container: containerDefaultProps
 	},
+	agchartscomponent: {
+		container: containerDefaultProps
+	},
+	agchartscomponentee: {
+		container: containerDefaultProps
+	},
 	chartjscomponent: {
+		container: containerDefaultProps
+	},
+	chartjscomponentv2: {
 		container: containerDefaultProps
 	},
 	vegalitecomponent: {},
@@ -687,6 +698,9 @@ export const quickStyleProperties: Record<
 		input: inputDefaultProps
 	},
 	fileinputcomponent: {
+		container: containerDefaultProps
+	},
+	s3fileinputcomponent: {
 		container: containerDefaultProps
 	},
 	textinputcomponent: {
@@ -746,5 +760,13 @@ export const quickStyleProperties: Record<
 		allTabs: [typographyGrouping, sizeGrouping],
 		selectedTab: [typographyGrouping, sizeGrouping]
 	},
-	selectstepcomponent: {}
+	selectstepcomponent: {},
+	statcomponent: {},
+	menucomponent: {
+		button: buttonDefaultProps
+	},
+	decisiontreecomponent: {
+		container: containerDefaultProps
+	},
+	dbexplorercomponent: {}
 }

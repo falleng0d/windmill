@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { initConfig, initOutput } from '$lib/components/apps/editor/appUtils'
-	import { getContext } from 'svelte'
+	import { getContext, onDestroy } from 'svelte'
 	import { twMerge } from 'tailwind-merge'
 	import type {
 		AppViewerContext,
@@ -32,6 +32,10 @@
 		result: null as number | null
 	})
 
+	onDestroy(() => {
+		listInputs?.remove(id)
+	})
+
 	let resolvedConfig = initConfig(
 		components['currencycomponent'].initialData.configuration,
 		configuration
@@ -48,7 +52,7 @@
 	function handleInput() {
 		outputs?.result.set(value ?? null)
 		if (iterContext && listInputs) {
-			listInputs(id, value ?? null)
+			listInputs.set(id, value ?? null)
 		}
 	}
 
@@ -98,7 +102,7 @@
 								'wm-currency-input'
 							),
 							wrapper: 'w-full windmillapp',
-							formattedZero: twMerge('text-black windmillapp ', css?.input?.class, 'wm-currency')
+							formattedZero: twMerge('windmillapp ', css?.input?.class, 'wm-currency')
 						}}
 						style={css?.input?.style}
 						bind:value

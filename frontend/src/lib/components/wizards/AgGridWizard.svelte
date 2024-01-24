@@ -4,8 +4,8 @@
 	import SimpleEditor from '../SimpleEditor.svelte'
 	import Label from '../Label.svelte'
 	import Tooltip from '../Tooltip.svelte'
-
 	import Button from '../common/button/Button.svelte'
+	import { offset, flip, shift } from 'svelte-floating-ui/dom'
 
 	type Column = {
 		minWidth: number
@@ -23,6 +23,7 @@
 		valueParser: string
 		field: string
 		headerName: string
+		editable: boolean
 	}
 
 	export let value: Column | undefined
@@ -82,7 +83,11 @@
 </script>
 
 <Popup
-	floatingConfig={{ strategy: 'fixed', placement: 'left-end' }}
+	floatingConfig={{
+		strategy: 'fixed',
+		placement: 'left-end',
+		middleware: [offset(8), flip(), shift()]
+	}}
 	containerClasses="border rounded-lg shadow-lg bg-surface p-4"
 >
 	<svelte:fragment slot="button">
@@ -101,6 +106,17 @@
 
 			<Label label="Header name">
 				<input type="text" placeholder="Header name" bind:value={value.headerName} />
+			</Label>
+
+			<Label label="Editable value">
+				<Toggle
+					on:pointerdown={(e) => {
+						e?.stopPropagation()
+					}}
+					options={{ right: 'Editable' }}
+					bind:checked={value.editable}
+					size="xs"
+				/>
 			</Label>
 
 			<Label label="Min width (px)">
@@ -185,7 +201,13 @@
 							</select>
 						</div>
 
-						<SimpleEditor autoHeight lang="javascript" bind:code={value.valueFormatter} />
+						<SimpleEditor
+							extraLib={'declare const value: any'}
+							autoHeight
+							lang="javascript"
+							bind:code={value.valueFormatter}
+						/>
+						<div class="text-xs text-secondary -mt-4">Use `value` in the formatter</div>
 					</div>
 				{/key}
 			</div>

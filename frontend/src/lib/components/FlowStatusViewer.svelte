@@ -10,21 +10,18 @@
 	export let jobId: string
 	export let workspaceId: string | undefined = undefined
 	export let flowStateStore: Writable<FlowState> | undefined = undefined
+	export let selectedJobStep: string | undefined = undefined
 
 	export let isOwner = false
 
 	let lastJobId: string = jobId
 
-	let flowModuleStates = writable({})
 	let retryStatus = writable({})
 	let suspendStatus = writable({})
-	let durationStatuses = writable({})
 	setContext<FlowStatusViewerContext>('FlowStatusViewer', {
 		flowStateStore,
-		flowModuleStates,
-		retryStatus,
 		suspendStatus,
-		durationStatuses
+		retryStatus
 	})
 
 	function loadOwner(path: string) {
@@ -34,10 +31,8 @@
 	async function updateJobId() {
 		if (jobId !== lastJobId) {
 			lastJobId = jobId
-			$flowModuleStates = {}
 			$retryStatus = {}
 			$suspendStatus = {}
-			$durationStatuses = {}
 		}
 	}
 
@@ -56,6 +51,9 @@
 		}
 		dispatch('jobsLoaded', detail)
 	}}
+	globalDurationStatuses={[]}
+	globalModuleStates={[]}
+	bind:selectedNode={selectedJobStep}
 	{jobId}
 	{workspaceId}
 	{isOwner}

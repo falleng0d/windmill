@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte'
+	import { getContext, onDestroy } from 'svelte'
 	import Select from '../../svelte-select/lib/index'
 
 	import type {
@@ -30,6 +30,7 @@
 	export let extraKey: string | undefined = undefined
 	export let preclickAction: (() => Promise<void>) | undefined = undefined
 	export let recomputeIds: string[] | undefined = undefined
+	export let noInitialize = false
 	export let controls: { left: () => boolean; right: () => boolean | string } | undefined =
 		undefined
 
@@ -77,8 +78,8 @@
 		listItems = Array.isArray(resolvedConfig.items)
 			? resolvedConfig.items.map((item) => {
 					return {
-						label: item.label,
-						value: JSON.stringify(item.value)
+						label: item?.label ?? 'undefined',
+						value: item?.value != undefined ? JSON.stringify(item.value) : 'undefined'
 					}
 			  })
 			: []
@@ -93,12 +94,17 @@
 			outputs?.result.set(rawValue)
 		}
 		if (iterContext && listInputs) {
-			listInputs(id, rawValue)
+			listInputs.set(id, rawValue)
 		}
 		if (rowContext && rowInputs) {
-			rowInputs(id, rawValue)
+			rowInputs.set(id, rawValue)
 		}
 	}
+
+	onDestroy(() => {
+		listInputs?.remove(id)
+		rowInputs?.remove(id)
+	})
 
 	function onChange(e: CustomEvent) {
 		e?.stopPropagation()
@@ -121,10 +127,10 @@
 		value = nvalue
 		outputs?.result.set(result)
 		if (iterContext && listInputs) {
-			listInputs(id, result)
+			listInputs.set(id, result)
 		}
 		if (rowContext && rowInputs) {
-			rowInputs(id, result)
+			rowInputs.set(id, result)
 		}
 		if (recomputeIds) {
 			recomputeIds.forEach((id) => $runnableComponents?.[id]?.cb?.forEach((f) => f()))
@@ -135,7 +141,7 @@
 		value = undefined
 		outputs?.result.set(undefined, true)
 		if (iterContext && listInputs) {
-			listInputs(id, undefined)
+			listInputs.set(id, undefined)
 		}
 	}
 
@@ -184,7 +190,9 @@
 	/>
 {/each}
 
-<InitializeComponent {id} />
+{#if !noInitialize}
+	<InitializeComponent {id} />
+{/if}
 
 <AlignWrapper {render} {verticalAlignment}>
 	<div

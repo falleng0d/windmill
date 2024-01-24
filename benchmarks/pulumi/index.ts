@@ -118,7 +118,7 @@ const db = new aws.rds.Instance("bench", {
   dbName: "windmill",
   engine: "postgres",
   engineVersion: "14.8",
-  instanceClass: "db.m5d.large",
+  instanceClass: "db.t4g.2xlarge",
   password: "postgres",
   skipFinalSnapshot: true,
   username: "postgres",
@@ -198,7 +198,7 @@ const asg = new aws.autoscaling.Group("asg3", {
     version: "$Latest",
   },
   minSize: 0,
-  maxSize: 15,
+  maxSize: 2,
   vpcZoneIdentifiers: [subnetA.id],
   tags: [
     {
@@ -242,7 +242,7 @@ const lb = new awsx.lb.ApplicationLoadBalancer("lb2", {
 //   desiredCount: 2,
 //   taskDefinitionArgs: {
 //     container: {
-//       image: "nginx:latest",
+//       image: "nginx:main@sha256:31ce1955e23ec18963e5d3d7357dc68b1a62f54145d19ceff4054d257066129e",
 //       cpu: 512,
 //       memory: 128,
 //       essential: true,
@@ -261,7 +261,7 @@ db.address.apply((address) => {
     containerDefinitions: JSON.stringify([
       {
         name: "windmill-worker",
-        image: "ghcr.io/windmill-labs/windmill:1.165.0",
+        image: "ghcr.io/windmill-labs/windmill-ee:main@sha256:31ce1955e23ec18963e5d3d7357dc68b1a62f54145d19ceff4054d257066129e",
         cpu: 1024,
         memory: 1800,
         essential: true,
@@ -272,7 +272,10 @@ db.address.apply((address) => {
           },
         ],
         environment: [
-          { name: "DISABLE_SERVER", value: "true" },
+          { name: "MODE", value: "worker" },
+          { name: "NUM_WORKERS", value: "5" },
+          { name: "DATABASE_CONNECTIONS", value: "10"},
+          { name: "SLEEP_QUEUE", value: "300"},
           // { name: "METRICS_ADDR", value: "true" },
           { name: "RUST_LOG", value: "info" },
           {
@@ -293,6 +296,70 @@ db.address.apply((address) => {
         dockerLabels: {
           PROMETHEUS_EXPORTER_PORT: "8001",
         },
+        portMappings: [
+          {
+            containerPort: 8001,
+          },
+        ],
+      },
+    ]),
+    volumes: [
+      {
+        name: "dependency_cache",
+        dockerVolumeConfiguration: {
+          scope: "shared",
+          autoprovision: true,
+        },
+      },
+    ],
+  });
+
+  const worker_td2 = new aws.ecs.TaskDefinition("worker-3", {
+    family: "windmill-worker-2",
+    containerDefinitions: JSON.stringify([
+      {
+        name: "windmill-worker",
+        image: "ghcr.io/windmill-labs/windmill-ee:main@sha256:31ce1955e23ec18963e5d3d7357dc68b1a62f54145d19ceff4054d257066129e",
+        cpu: 1024,
+        memory: 1800,
+        essential: true,
+        mountPaths: [
+          {
+            containerPath: "/tmp/windmill/cache",
+            sourceVolume: "dependency_cache",
+          },
+        ],
+        environment: [
+          { name: "WORKER_GROUP", value: "dedicated" },
+          { name: "NUM_WORKERS", value: "10" },
+          { name: "DATABASE_CONNECTIONS", value: "15"},
+          { name: "SLEEP_QUEUE", value: "300"},
+          { name: "MODE", value: "worker" },
+          // { name: "METRICS_ADDR", value: "true" },
+          { name: "RUST_LOG", value: "info" },
+          {
+            name: "DATABASE_URL",
+            value: `postgres://postgres:postgres@${address}/windmill?sslmode=disable`,
+          },
+        ],
+
+        logConfiguration: {
+          logDriver: "awslogs",
+          options: {
+            "awslogs-group": "windmill-worker",
+            "awslogs-region": "us-east-2",
+            "awslogs-create-group": "true",
+            "awslogs-stream-prefix": "windmill-worker",
+          },
+        },
+        dockerLabels: {
+          PROMETHEUS_EXPORTER_PORT: "8001",
+        },
+        portMappings: [
+          {
+            containerPort: 8001,
+          },
+        ],
       },
     ]),
     volumes: [
@@ -311,14 +378,15 @@ db.address.apply((address) => {
     containerDefinitions: JSON.stringify([
       {
         name: "windmill-server",
-        image: "ghcr.io/windmill-labs/windmill:1.165.0",
+        image: "ghcr.io/windmill-labs/windmill-ee:main@sha256:31ce1955e23ec18963e5d3d7357dc68b1a62f54145d19ceff4054d257066129e",
         cpu: 1024,
         memory: 1024,
         essential: true,
         environment: [
-          { name: "NUM_WORKERS", value: "0" },
+          { name: "MODE", value: "server" },
           // { name: "METRICS_ADDR", value: "true" },
           { name: "RUST_LOG", value: "info" },
+          { name: "DATABASE_CONNECTIONS", value: "5"},
           {
             name: "DATABASE_URL",
             value: `postgres://postgres:postgres@${address}/windmill?sslmode=disable`,
@@ -351,7 +419,7 @@ db.address.apply((address) => {
   const service_server = new aws.ecs.Service("service-server", {
     cluster: cluster.id,
     taskDefinition: server_td.arn,
-    desiredCount: 2,
+    desiredCount: 1,
     forceNewDeployment: true,
     orderedPlacementStrategies: [
       {
@@ -371,7 +439,20 @@ db.address.apply((address) => {
   const service_worker = new aws.ecs.Service("service-worker", {
     cluster: cluster.id,
     taskDefinition: worker_td.arn,
-    desiredCount: 30,
+    desiredCount: 1,
+    forceNewDeployment: true,
+    orderedPlacementStrategies: [
+      {
+        type: "binpack",
+        field: "cpu",
+      },
+    ],
+  });
+
+  const service_worker2 = new aws.ecs.Service("service-worker-2", {
+    cluster: cluster.id,
+    taskDefinition: worker_td2.arn,
+    desiredCount: 0,
     forceNewDeployment: true,
     orderedPlacementStrategies: [
       {

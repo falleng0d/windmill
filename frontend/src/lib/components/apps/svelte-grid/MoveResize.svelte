@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { createEventDispatcher, getContext } from 'svelte'
-	import type { AppEditorContext } from '../types'
+	import { createEventDispatcher, getContext, onMount } from 'svelte'
+	import type { AppEditorContext, AppViewerContext } from '../types'
 	import { writable } from 'svelte/store'
 
 	const dispatch = createEventDispatcher()
@@ -28,6 +28,8 @@
 	export let shadow: { x: number; y: number; w: number; h: number } | undefined = undefined
 
 	const ctx = getContext<AppEditorContext>('AppEditorContext')
+	const { mode } = getContext<AppViewerContext>('AppViewerContext')
+
 	const scale = ctx ? ctx.scale : writable(100)
 
 	const divId = `component-${id}`
@@ -48,6 +50,35 @@
 	let trans = false
 
 	let anima
+
+	onMount(() => {
+		if (ctx && $mode == 'dnd') {
+			ctx.dndItem.update((x) => {
+				x[id] = (moveX, moveY, topY) => {
+					ctx.componentActive.set(true)
+					let gridItem = document.getElementById(divId)
+					let irect = gridItem?.getBoundingClientRect()
+
+					const clientX = (irect?.x ?? 0) + (irect?.width ?? 0)
+					const clientY = irect?.y ?? 0
+					initX = (clientX / $scale) * 100
+					initY = (clientY / $scale) * 100
+
+					window.addEventListener('pointermove', pointermove)
+					window.addEventListener('pointerup', pointerup)
+
+					dispatch('initmove')
+
+					const cordDiff = {
+						x: (moveX / $scale) * 100 - initX,
+						y: (moveY / $scale) * 100 - initY
+					}
+					dispatch('move', { cordDiff, clientY: clientY })
+				}
+				return x
+			})
+		}
+	})
 
 	export function inActivate() {
 		if (shadowElement && shadow != undefined) {
@@ -138,6 +169,7 @@
 	const pointerdown = ({ clientX, clientY }) => {
 		dragClosure = () => {
 			dragClosure = undefined
+			ctx.componentActive.set(true)
 
 			initX = (clientX / $scale) * 100
 			initY = (clientY / $scale) * 100
@@ -164,7 +196,7 @@
 
 	let sign = { x: 0, y: 0 }
 	let vel = { x: 0, y: 0 }
-	let intervalId: NodeJS.Timer | undefined = undefined
+	let intervalId: NodeJS.Timeout | undefined = undefined
 
 	const stopAutoscroll = () => {
 		intervalId && clearInterval(intervalId)
@@ -174,16 +206,18 @@
 	}
 
 	const update = () => {
-		const boundX = capturePos.x + cordDiff.x
-		const _newScrollTop = (scrollElement?.scrollTop ?? 0) - (_scrollTop ?? 0)
-		const boundY = capturePos.y + (cordDiff.y + _newScrollTop)
+		if (xPerPx != 0) {
+			const boundX = capturePos.x + cordDiff.x
+			const _newScrollTop = (scrollElement?.scrollTop ?? 0) - (_scrollTop ?? 0)
+			const boundY = capturePos.y + (cordDiff.y + _newScrollTop)
 
-		let gridX = Math.round(boundX / xPerPx)
-		let gridY = Math.round(boundY / yPerPx)
+			let gridX = Math.round(boundX / xPerPx)
+			let gridY = Math.round(boundY / yPerPx)
 
-		if (shadow) {
-			shadow.x = Math.max(Math.min(gridX, cols - shadow.w), 0)
-			shadow.y = Math.max(gridY, 0)
+			if (shadow) {
+				shadow.x = Math.max(Math.min(gridX, cols - shadow.w), 0)
+				shadow.y = Math.max(gridY, 0)
+			}
 		}
 	}
 
@@ -239,6 +273,7 @@
 		}
 	}
 	const pointerup = (e) => {
+		ctx.componentActive.set(false)
 		stopAutoscroll()
 
 		window.removeEventListener('pointerdown', pointerdown)
@@ -290,9 +325,11 @@
 			// Limit bound
 			newSize.width = Math.min(newSize.width, maxWidth * xPerPx - gapX * 2)
 
-			// Limit col & row
-			shadow.w = Math.round(Math.max((newSize.width + gapX * 2) / xPerPx, 1))
-			shadow.h = Math.round(Math.max((newSize.height + gapY * 2) / yPerPx, 1))
+			if (xPerPx) {
+				// Limit col & row
+				shadow.w = Math.round(Math.max((newSize.width + gapX * 2) / xPerPx, 1))
+				shadow.h = Math.round(Math.max((newSize.height + gapY * 2) / yPerPx, 1))
+			}
 
 			repaint(false, false)
 		}
@@ -315,19 +352,27 @@
 	id={divId}
 	class="svlt-grid-item"
 	class:svlt-grid-active={active || (trans && rect)}
-	style="width: {active ? newSize.width : width}px; height:{active ? newSize.height : height}px; 
+	style="width: {xPerPx == 0 ? 0 : active ? newSize.width : width}px; height:{xPerPx == 0
+		? 0
+		: active
+		? newSize.height
+		: height}px; 
+	{xPerPx == 0 ? 'overflow: hidden;' : ''}
 	{onTop ? 'z-index: 1000;' : ''}
+	
   {active && rect
-		? `transform: translate(${cordDiff.x}px, ${cordDiff.y}px);top:${rect.top}px;left:${rect.left}px;`
+		? `transform: translate(${cordDiff.x}px, ${cordDiff.y}px);top:${rect.top}px;left:${rect.left}px;z-index:10000;`
 		: trans
 		? `transform: translate(${cordDiff.x}px, ${cordDiff.y}px); position:absolute; transition: width 0.2s, height 0.2s;`
-		: `transition: transform 0.1s, opacity 0.1s; transform: translate(${left}px, ${top}px); `} "
+		: `${
+				xPerPx > 0 ? 'transition: transform 0.1s, opacity 0.1s;' : ''
+		  } transform: translate(${left}px, ${top}px); `} "
 >
 	<slot />
 	<div class="svlt-grid-resizer" on:pointerdown={resizePointerDown} />
 </div>
 
-{#if (active || trans) && shadow}
+{#if xPerPx > 0 && (active || trans) && shadow}
 	<div
 		class="svlt-grid-shadow shadow-active"
 		style="width: {shadow.w * xPerPx - gapX * 2}px; height: {shadow.h * yPerPx -
@@ -367,7 +412,7 @@
 	}
 
 	.svlt-grid-active {
-		z-index: 3;
+		z-index: 300;
 		cursor: grabbing;
 		position: fixed;
 		opacity: 0.5;

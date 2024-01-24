@@ -1,19 +1,20 @@
 <script lang="ts">
 	import type { FlowEditorContext } from '../types'
-	import { getContext, tick } from 'svelte'
+	import { createEventDispatcher, getContext, tick } from 'svelte'
 	import {
 		createBranchAll,
 		createBranches,
 		createLoop,
 		deleteFlowStateById,
-		emptyModule
+		emptyModule,
+		pickScript
 	} from '$lib/components/flows/flowStateUtils'
 	import type { FlowModule } from '$lib/gen'
 	import { emptyFlowModuleState } from '../utils'
 	import FlowSettingsItem from './FlowSettingsItem.svelte'
 	import FlowConstantsItem from './FlowConstantsItem.svelte'
 
-	import { dfs } from '../flowStore'
+	import { dfs } from '../dfs'
 	import { FlowGraph } from '$lib/components/graph'
 	import FlowErrorHandlerItem from './FlowErrorHandlerItem.svelte'
 	import { push } from '$lib/history'
@@ -30,6 +31,10 @@
 
 	export let modules: FlowModule[] | undefined
 	export let sidebarSize: number | undefined = undefined
+	export let disableStaticInputs = false
+	export let disableTutorials = false
+	export let disableAi = false
+	export let smallErrorHandler = false
 
 	let flowTutorials: FlowTutorials | undefined = undefined
 
@@ -39,12 +44,23 @@
 	async function insertNewModuleAtIndex(
 		modules: FlowModule[],
 		index: number,
-		kind: 'script' | 'forloop' | 'branchone' | 'branchall' | 'flow' | 'trigger' | 'approval' | 'end'
+		kind:
+			| 'script'
+			| 'forloop'
+			| 'branchone'
+			| 'branchall'
+			| 'flow'
+			| 'trigger'
+			| 'approval'
+			| 'end',
+		wsScript?: { path: string; summary: string; hash: string | undefined }
 	): Promise<FlowModule[]> {
 		push(history, $flowStore)
 		var module = emptyModule($flowStateStore, $flowStore, kind == 'flow')
 		var state = emptyFlowModuleState()
-		if (kind == 'forloop') {
+		if (wsScript) {
+			;[module, state] = await pickScript(wsScript.path, wsScript.summary, module.id, wsScript.hash)
+		} else if (kind == 'forloop') {
 			;[module, state] = await createLoop(module.id)
 		} else if (kind == 'branchone') {
 			;[module, state] = await createBranches(module.id)
@@ -150,6 +166,8 @@
 			!tutorialInProgress()
 		)
 	}
+
+	const dispatch = createEventDispatcher()
 </script>
 
 <Portal>
@@ -192,11 +210,14 @@
 			<div transition:fade class="absolute inset-0 bg-gray-500 bg-opacity-75 z-[900] !m-0" />
 		{/if}
 		<FlowSettingsItem />
-		<FlowConstantsItem />
+		{#if !disableStaticInputs}
+			<FlowConstantsItem />
+		{/if}
 	</div>
 
-	<div class="flex-auto grow" bind:clientHeight={minHeight}>
+	<div class="z-10 flex-auto grow" bind:clientHeight={minHeight}>
 		<FlowGraph
+			{disableAi}
 			insertable
 			scroll
 			{minHeight}
@@ -239,7 +260,12 @@
 							$selectedId = $moving.module.id
 							$moving = undefined
 						} else {
-							await insertNewModuleAtIndex(detail.modules, detail.index ?? 0, detail.detail)
+							await insertNewModuleAtIndex(
+								detail.modules,
+								detail.index ?? 0,
+								detail.detail,
+								detail.script
+							)
 							$selectedId = detail.modules[detail.index ?? 0].id
 						}
 
@@ -248,6 +274,7 @@
 						}
 
 						$flowStore = $flowStore
+						dispatch('change')
 					}
 				}
 			}}
@@ -267,7 +294,6 @@
 			on:move={async ({ detail }) => {
 				if (!$moving || $moving.module.id !== detail.module.id) {
 					if (detail.module && detail.modules) {
-						console.log('MOVE+')
 						$moving = { module: detail.module, modules: detail.modules }
 					}
 				} else {
@@ -277,10 +303,14 @@
 		/>
 	</div>
 	<div
-		class="z-10 absolute w-full inline-flex flex-col gap-2 bottom-0 left-0 flex-initial p-2 items-center border-b"
+		class="z-10 absolute inline-flex w-full text-sm gap-2 bottom-0 left-0 p-2 {smallErrorHandler
+			? 'flex-row-reverse'
+			: 'justify-center'} border-b"
 	>
-		<FlowErrorHandlerItem />
+		<FlowErrorHandlerItem small={smallErrorHandler} />
 	</div>
 </div>
 
-<FlowTutorials bind:this={flowTutorials} on:reload />
+{#if !disableTutorials}
+	<FlowTutorials bind:this={flowTutorials} on:reload />
+{/if}

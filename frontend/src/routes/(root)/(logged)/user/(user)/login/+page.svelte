@@ -1,11 +1,16 @@
 <script lang="ts">
 	import { goto } from '$app/navigation'
 	import { page } from '$app/stores'
-	import { faGithub, faGitlab, faGoogle, faMicrosoft } from '@fortawesome/free-brands-svg-icons'
+	import Github from '$lib/components/icons/brands/Github.svelte'
+	import Gitlab from '$lib/components/icons/brands/Gitlab.svelte'
+	import Google from '$lib/components/icons/brands/Google.svelte'
+	import Microsoft from '$lib/components/icons/brands/Microsoft.svelte'
+	import Okta from '$lib/components/icons/brands/Okta.svelte'
+
 	import { onMount } from 'svelte'
 	import { OauthService, UserService, WorkspaceService } from '$lib/gen'
-	import { clearStores, usersWorkspaceStore, workspaceStore, userStore } from '$lib/stores'
-	import { classNames, parseQueryParams } from '$lib/utils'
+	import { usersWorkspaceStore, workspaceStore, userStore } from '$lib/stores'
+	import { classNames, emptyString, parseQueryParams } from '$lib/utils'
 	import { getUserExt } from '$lib/user'
 	import { Button, Skeleton } from '$lib/components/common'
 	import { WindmillIcon } from '$lib/components/icons'
@@ -14,6 +19,7 @@
 	import { refreshSuperadmin } from '$lib/refreshUser'
 	import LoginPageHeader from '$lib/components/LoginPageHeader.svelte'
 	import DarkModeToggle from '$lib/components/sidebar/DarkModeToggle.svelte'
+	import { clearStores } from '$lib/storeUtils'
 
 	let email = $page.url.searchParams.get('email') ?? ''
 	let password = $page.url.searchParams.get('password') ?? ''
@@ -23,22 +29,27 @@
 		{
 			type: 'github',
 			name: 'GitHub',
-			icon: faGithub
+			icon: Github
 		},
 		{
 			type: 'gitlab',
 			name: 'GitLab',
-			icon: faGitlab
+			icon: Gitlab
 		},
 		{
 			type: 'google',
 			name: 'Google',
-			icon: faGoogle
+			icon: Google
 		},
 		{
 			type: 'microsoft',
 			name: 'Microsoft',
-			icon: faMicrosoft
+			icon: Microsoft
+		},
+		{
+			type: 'okta',
+			name: 'Okta',
+			icon: Okta
 		}
 	] as const
 
@@ -104,8 +115,21 @@
 			const allWorkspaces = $usersWorkspaceStore?.workspaces.filter((x) => x.id != 'admins')
 
 			if (allWorkspaces?.length == 1) {
-				$workspaceStore = allWorkspaces[0].id
-				goto(rd ?? '/')
+				workspaceStore.set(allWorkspaces[0].id)
+				$userStore = await getUserExt($workspaceStore!)
+
+				if (!$userStore?.is_super_admin && $userStore?.operator) {
+					let defaultApp = await WorkspaceService.getWorkspaceDefaultApp({
+						workspace: $workspaceStore!
+					})
+					if (!emptyString(defaultApp.default_app_path)) {
+						goto(`/apps/get/${defaultApp.default_app_path}`)
+					} else {
+						goto(rd ?? '/')
+					}
+				} else {
+					goto(rd ?? '/')
+				}
 			} else if (rd?.startsWith('/user/workspaces')) {
 				goto(rd)
 			} else if (rd == '/#user-settings') {
@@ -120,6 +144,7 @@
 		const allLogins = await OauthService.listOAuthLogins()
 		logins = allLogins.oauth
 		saml = allLogins.saml
+
 		showPassword = (logins.length == 0 && !saml) || (email != undefined && email.length > 0)
 	}
 
@@ -190,10 +215,9 @@
 					{#each providers as { type, icon, name }}
 						{#if logins?.includes(type)}
 							<Button
-								color="dark"
+								color="light"
 								variant="border"
-								endIcon={{ icon }}
-								btnClasses="w-full !border-gray-300"
+								startIcon={{ icon, classes: 'h-4' }}
 								on:click={() => storeRedirect(type)}
 							>
 								{name}

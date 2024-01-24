@@ -64,8 +64,6 @@ pub enum Error {
     Anyhow(#[from] anyhow::Error),
     #[error("Error: {0:#?}")]
     JsonErr(serde_json::Value),
-    #[error("Custom Status Code: {0:#?}")]
-    CustomStatusCode(StatusCode, serde_json::Value),
     #[error("{0}")]
     OpenAIError(String),
 }
@@ -86,11 +84,11 @@ impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response<BoxBody> {
         let e = &self;
         let body = body::boxed(body::Full::from(e.to_string()));
+
         let status = match self {
             Self::NotFound(_) => axum::http::StatusCode::NOT_FOUND,
             Self::NotAuthorized(_) => axum::http::StatusCode::UNAUTHORIZED,
             Self::RequireAdmin(_) => axum::http::StatusCode::FORBIDDEN,
-            Self::CustomStatusCode(code, _) => code,
             Self::SqlErr(_) | Self::BadRequest(_) | Self::OpenAIError(_) => {
                 axum::http::StatusCode::BAD_REQUEST
             }
@@ -98,9 +96,9 @@ impl IntoResponse for Error {
         };
 
         if matches!(status, axum::http::StatusCode::NOT_FOUND) {
-            tracing::warn!(not_found = e.to_string());
+            tracing::warn!(message = e.to_string());
         } else {
-            tracing::error!(error = e.to_string());
+            tracing::error!(message = e.to_string());
         };
 
         axum::response::Response::builder()

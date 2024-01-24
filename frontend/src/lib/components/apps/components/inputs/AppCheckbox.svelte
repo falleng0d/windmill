@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Toggle from '$lib/components/Toggle.svelte'
-	import { getContext } from 'svelte'
+	import { getContext, onDestroy } from 'svelte'
 	import { initConfig, initOutput } from '../../editor/appUtils'
 	import type {
 		AppViewerContext,
@@ -26,6 +26,7 @@
 	export let render: boolean
 	export let extraKey: string | undefined = undefined
 	export let preclickAction: (() => Promise<void>) | undefined = undefined
+	export let noInitialize = false
 
 	export let controls: { left: () => boolean; right: () => boolean | string } | undefined =
 		undefined
@@ -64,10 +65,10 @@
 	function handleInput() {
 		outputs.result.set(value)
 		if (iterContext && listInputs) {
-			listInputs(id, value)
+			listInputs.set(id, value)
 		}
 		if (rowContext && rowInputs) {
-			rowInputs(id, value)
+			rowInputs.set(id, value)
 		}
 		if (recomputeIds) {
 			recomputeIds.forEach((id) => $runnableComponents?.[id]?.cb?.forEach((cb) => cb()))
@@ -78,6 +79,11 @@
 		value = resolvedConfig.defaultValue ?? false
 		handleInput()
 	}
+
+	onDestroy(() => {
+		listInputs?.remove(id)
+		rowInputs?.remove(id)
+	})
 
 	$: value != undefined && handleInput()
 
@@ -106,7 +112,10 @@
 	/>
 {/each}
 
-<InitializeComponent {id} />
+{#if !noInitialize}
+	<InitializeComponent {id} />
+{/if}
+
 <AlignWrapper
 	{render}
 	{horizontalAlignment}
